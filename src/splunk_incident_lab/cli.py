@@ -84,14 +84,16 @@ def main() -> int:
             os.environ.get("SPLUNK_USERNAME", "admin"),
             os.environ["SPLUNK_PASSWORD"],
         )
-        rows = client.run_search(
-            'search index=main source="splunk-incident-lab:checkout" trace_id="k8s-trace-*" '
-            '| spath | table _time trace_id status latency_ms message'
+        query = (
+            'search index=main source="splunk-incident-lab:checkout" '
+            '| spath | search trace_id="k8s-trace-*" '
+            '| table _time trace_id status latency_ms message'
         )
+        rows = client.run_search(query)
         slow = [row for row in rows if int(row.get("latency_ms", 0)) > 750]
         errors = [row for row in rows if int(row.get("status", 0)) >= 500]
         payload = {
-            "query": 'search index=main source="splunk-incident-lab:checkout" trace_id="k8s-trace-*" | spath | table _time trace_id status latency_ms message',
+            "query": query,
             "row_count": len(rows),
             "slow_event_count": len(slow),
             "error_event_count": len(errors),
