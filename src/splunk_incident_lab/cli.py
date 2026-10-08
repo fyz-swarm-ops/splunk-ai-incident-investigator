@@ -24,6 +24,9 @@ def main() -> int:
     investigate.add_argument("--events", type=Path, required=True)
     investigate.add_argument("--output", type=Path, required=True)
 
+    verify_k8s = sub.add_parser("verify-k8s")
+    verify_k8s.add_argument("--output", type=Path, required=True)
+
     export = sub.add_parser("export")
     export.add_argument("--evidence", type=Path, required=True)
 
@@ -74,6 +77,32 @@ def main() -> int:
             )
         write_reports(args.output, investigation)
         print(f"wrote investigation evidence to {args.output}")
+        return 0
+    if args.command == "verify-k8s":
+        client = SplunkRestClient(
+            os.environ.get("SPLUNKD_URL", "https://localhost:8089"),
+            os.environ.get("SPLUNK_USERNAME", "admin"),
+            os.environ["SPLUNK_PASSWORD"],
+        )
+        rows = client.run_search(
+            'search index=main source="splunk-incident-lab:checkout" trace_id="k8s-trace-*" '
+            '| spath | table _time trace_id status latency_ms message'
+        )
+        slow = [row for row in rows if int(row.get("latency_ms", 0)) > 750]
+        errors = [row for row in rows if int(row.get("status", 0)) >= 500]
+        payload = {
+            "query": 'search index=main source="splunk-incident-lab:checkout" trace_id="k8s-trace-*" | spath | table _time trace_id status latency_ms message',
+            "row_count": len(rows),
+            "slow_event_count": len(slow),
+            "error_event_count": len(errors),
+            "matches_expected_kubernetes_shape": len(slow) == 3 and len(errors) == 1,
+            "rows": rows,
+        }
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        import json
+
+        args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"wrote Kubernetes Splunk verification to {args.output}")
         return 0
     if args.command == "export":
         # Reports are written during investigation; export validates/refreshes

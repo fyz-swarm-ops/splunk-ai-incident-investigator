@@ -3,7 +3,7 @@ EVIDENCE_DIR ?= evidence/latest
 SPLUNK_MODE ?= local
 SPLUNK_PASSWORD ?= changeme-please-change
 
-.PHONY: test lab-up lab-down lab-seed lab-investigate lab-export lab-reproduce lab-deploy
+.PHONY: test lab-up lab-down lab-seed lab-investigate lab-export lab-reproduce lab-deploy lab-kind-up lab-kind-down lab-k8s-secret lab-run-k8s lab-k8s-logs lab-verify-k8s
 
 test:
 	$(PYTHON) -m pytest tests
@@ -33,3 +33,25 @@ lab-deploy:
 	kubectl apply -f k8s/namespace.yaml
 	kubectl apply -f k8s/telemetry-generator.yaml
 
+lab-kind-up:
+	kind create cluster --name splunk-incident-lab
+
+lab-kind-down:
+	kind delete cluster --name splunk-incident-lab
+
+lab-k8s-secret:
+	kubectl apply -f k8s/namespace.yaml
+	kubectl -n splunk-incident-lab create secret generic splunk-incident-lab-splunk --from-literal=password="$(SPLUNK_PASSWORD)" --dry-run=client -o yaml | kubectl apply -f -
+
+lab-run-k8s:
+	mkdir -p $(EVIDENCE_DIR)/kubernetes
+	@job="checkout-telemetry-generator-manual-$$(date +%s)"; \
+	kubectl -n splunk-incident-lab create job --from=cronjob/checkout-telemetry-generator "$$job"; \
+	kubectl -n splunk-incident-lab wait --for=condition=complete "job/$$job" --timeout=180s; \
+	kubectl -n splunk-incident-lab logs "job/$$job" > $(EVIDENCE_DIR)/kubernetes/telemetry-generator.log
+
+lab-k8s-logs:
+	kubectl -n splunk-incident-lab get pods,jobs,cronjobs
+
+lab-verify-k8s:
+	$(PYTHON) -m splunk_incident_lab.cli verify-k8s --output $(EVIDENCE_DIR)/raw/kubernetes-splunk-results.json

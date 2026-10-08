@@ -124,6 +124,37 @@ def test_splunk_successful_query_round_trip():
         server.shutdown()
 
 
+def test_kubernetes_verification_command_writes_expected_counts(tmp_path):
+    server = _start_server(_SplunkK8sHandler)
+    output = tmp_path / "raw" / "kubernetes-splunk-results.json"
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "splunk_incident_lab.cli",
+                "verify-k8s",
+                "--output",
+                str(output),
+            ],
+            env={
+                "SPLUNKD_URL": f"http://127.0.0.1:{server.server_port}",
+                "SPLUNK_PASSWORD": "ok",
+            },
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        server.shutdown()
+
+    assert "wrote Kubernetes Splunk verification" in result.stdout
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["matches_expected_kubernetes_shape"] is True
+    assert payload["slow_event_count"] == 3
+    assert payload["error_event_count"] == 1
+
+
 def test_llm_analysis_uses_configured_provider():
     server = _start_server(_LlmSuccessHandler)
     try:
@@ -201,6 +232,25 @@ class _SplunkSuccessHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         assert self.path.startswith("/services/search/jobs/oneshot")
         body = b'{"results":[{"trace_id":"trace-0006","latency_ms":"920"}]}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass
+
+
+class _SplunkK8sHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        assert self.path.startswith("/services/search/jobs/oneshot")
+        rows = [
+            {"trace_id": "k8s-trace-0006", "latency_ms": "920", "status": "200"},
+            {"trace_id": "k8s-trace-0007", "latency_ms": "1180", "status": "500"},
+            {"trace_id": "k8s-trace-0008", "latency_ms": "1030", "status": "200"},
+        ]
+        body = json.dumps({"results": rows}).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))

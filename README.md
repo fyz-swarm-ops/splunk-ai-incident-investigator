@@ -93,6 +93,20 @@ The manifests in `k8s/` deploy a synthetic telemetry generator. A local `kind` c
 
 The Kubernetes generator emits the same deterministic checkout incident shape as the CLI seed path so local files, Splunk ingest, and cluster telemetry can be compared without random drift.
 
+With the Splunk Docker lab running, deploy and verify Kubernetes telemetry:
+
+```bash
+make lab-kind-up
+make lab-k8s-secret SPLUNK_PASSWORD='change-this-password'
+make lab-deploy
+make lab-run-k8s
+make lab-verify-k8s SPLUNK_PASSWORD='change-this-password'
+make lab-export
+make lab-kind-down
+```
+
+`lab-run-k8s` creates one manual job from the suspended CronJob, waits for completion, and stores pod logs under `evidence/latest/kubernetes/telemetry-generator.log`. `lab-verify-k8s` executes a Splunk REST query for `k8s-trace-*` events and writes `evidence/latest/raw/kubernetes-splunk-results.json`.
+
 ## Evidence UI
 
 After generating evidence, start the local UI/backend:
