@@ -1,0 +1,25 @@
+services:
+  splunk:
+    image: splunk/splunk:10.0
+    container_name: splunk-incident-lab
+    platform: linux/amd64
+    environment:
+      SPLUNK_START_ARGS: --accept-license
+      SPLUNK_GENERAL_TERMS: --accept-sgt-current-at-splunk-com
+      SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:?set SPLUNK_PASSWORD}
+    ports:
+      - "8000:8000"
+      - "8088:8088"
+      - "8089:8089"
+    volumes:
+      - splunk_etc:/opt/splunk/etc
+      - splunk_var:/opt/splunk/var
+    healthcheck:
+      test: ["CMD", "curl", "-ksf", "https://localhost:8089/services/server/info"]
+      interval: 20s
+      timeout: 10s
+      retries: 30
+
+volumes:
+  splunk_etc:
+  splunk_var:

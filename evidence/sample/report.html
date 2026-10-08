@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Splunk Incident Investigation</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem; color: #202124; }
+table { border-collapse: collapse; width: 100%; }
+td, th { border: 1px solid #d0d7de; padding: .45rem; text-align: left; }
+th { background: #f6f8fa; }
+details { border: 1px solid #d0d7de; border-radius: 6px; padding: .65rem; margin: .75rem 0; }
+code, pre { background: #f6f8fa; }
+pre { overflow: auto; padding: .75rem; }
+</style>
+</head>
+<body>
+<h1>Splunk Incident Investigation</h1>
+<p>Mode: <code>rest</code></p>
+<p>LLM: <code>llm-provider</code></p>
+<h2>Executed SPL Queries</h2>
+<table><tr><th>ID</th><th>Purpose</th><th>SPL</th></tr><tr><td><code>spl-latency-spike</code></td><td>Find checkout latency spikes above 750 ms.</td><td><code>search index=main source=&quot;splunk-incident-lab:checkout&quot; | spath | search service=checkout-api endpoint=&quot;/checkout&quot; latency_ms&gt;750 | table _time trace_id status latency_ms message</code></td></tr>
+<tr><td><code>spl-error-rate</code></td><td>Find checkout HTTP errors during the incident window.</td><td><code>search index=main source=&quot;splunk-incident-lab:checkout&quot; | spath | search service=checkout-api endpoint=&quot;/checkout&quot; status&gt;=500 | stats count by status message</code></td></tr></table>
+<h2>Findings</h2>
+<details open><summary>high finding-checkout-provider-timeout</summary><p>3 checkout events exceeded 750 ms; 1 returned HTTP 5xx.</p><p>The incident is consistent with a downstream payment provider timeout affecting checkout latency and one failed request.</p><p>Synthetic ground truth indicates provider timeout; live Splunk confirmation still depends on running the Docker lab and ingesting these events.</p></details>
+<h2>Timeline</h2>
+<table><tr><th>Time</th><th>Status</th><th>Latency ms</th><th>Trace</th><th>Message</th></tr><tr><td>2026-10-08T14:00:00Z</td><td>200</td><td>90</td><td><code>trace-0000</code></td><td>checkout request completed</td></tr>
+<tr><td>2026-10-08T14:01:00Z</td><td>200</td><td>101</td><td><code>trace-0001</code></td><td>checkout request completed</td></tr>
+<tr><td>2026-10-08T14:02:00Z</td><td>200</td><td>112</td><td><code>trace-0002</code></td><td>checkout request completed</td></tr>
+<tr><td>2026-10-08T14:03:00Z</td><td>200</td><td>123</td><td><code>trace-0003</code></td><td>checkout request completed</td></tr>
+<tr><td>2026-10-08T14:04:00Z</td><td>200</td><td>90</td><td><code>trace-0004</code></td><td>checkout request completed</td></tr>
+<tr><td>2026-10-08T14:05:00Z</td><td>200</td><td>101</td><td><code>trace-0005</code></td><td>checkout request completed</td></tr>
+<tr><td>2026-10-08T14:06:00Z</td><td>200</td><td>920</td><td><code>trace-0006</code></td><td>payment provider timeout during checkout</td></tr>
+<tr><td>2026-10-08T14:07:00Z</td><td>500</td><td>1180</td><td><code>trace-0007</code></td><td>payment provider timeout during checkout</td></tr>
+<tr><td>2026-10-08T14:08:00Z</td><td>200</td><td>1030</td><td><code>trace-0008</code></td><td>payment provider timeout during checkout</td></tr>
+<tr><td>2026-10-08T14:09:00Z</td><td>200</td><td>101</td><td><code>trace-0009</code></td><td>checkout request completed</td></tr>
+<tr><td>2026-10-08T14:10:00Z</td><td>200</td><td>112</td><td><code>trace-0010</code></td><td>checkout request completed</td></tr>
+<tr><td>2026-10-08T14:11:00Z</td><td>200</td><td>123</td><td><code>trace-0011</code></td><td>checkout request completed</td></tr></table>
+<h2>Evidence Navigation</h2>
+<p>Splunk verification: <code>{&quot;actual_error_row_count&quot;: 1, &quot;actual_slow_event_count&quot;: 3, &quot;expected_error_event_count&quot;: 1, &quot;expected_slow_event_count&quot;: 3, &quot;matches_expected_incident_shape&quot;: true}</code></p>
+<p>{&quot;hypothesis&quot;: &quot;A downstream payment provider timeout occurred during the incident window and caused elevated checkout latency for three requests and one HTTP 5xx failure.&quot;, &quot;observations&quot;: [&quot;Splunk query &#x27;spl-latency-spike&#x27; returned 3 checkout events with latency_ms 1030, 1180, and 920 (trace_ids: trace-0008, trace-0007, trace-0006). All three events include the message &#x27;payment provider timeout during checkout&#x27;.&quot;, &quot;Of the three slow events, two have status 200 (trace-0008, trace-0006) and one has status 500 (trace-0007).&quot;, &quot;Metrics show baseline median latency 101 ms, max_latency_ms 1180 ms, event_count 12, slow_event_count 3, and error_event_count 1.&quot;, &quot;The finding supplied with the evidence states the same hypothesis: &#x27;The incident is consistent with a downstream payment provider timeout affecting checkout latency and one failed request.&#x27;&quot;, &quot;The evidence source includes a note that the synthetic ground truth indicates a provider timeout and that live Splunk confirmation depends on running the Docker lab and ingesting these events.&quot;]}</p>
+<p>Safety note: Retrieved evidence was supplied to the model; unsupported claims remain disallowed by prompt contract.</p>
+<details open><summary>spl-latency-spike: 3 rows</summary><pre>[
+  {
+    &quot;_time&quot;: &quot;2026-10-08T21:15:39.000+00:00&quot;,
+    &quot;latency_ms&quot;: &quot;1030&quot;,
+    &quot;message&quot;: &quot;payment provider timeout during checkout&quot;,
+    &quot;status&quot;: &quot;200&quot;,
+    &quot;trace_id&quot;: &quot;trace-0008&quot;
+  },
+  {
+    &quot;_time&quot;: &quot;2026-10-08T21:15:39.000+00:00&quot;,
+    &quot;latency_ms&quot;: &quot;1180&quot;,
+    &quot;message&quot;: &quot;payment provider timeout during checkout&quot;,
+    &quot;status&quot;: &quot;500&quot;,
+    &quot;trace_id&quot;: &quot;trace-0007&quot;
+  },
+  {
+    &quot;_time&quot;: &quot;2026-10-08T21:15:39.000+00:00&quot;,
+    &quot;latency_ms&quot;: &quot;920&quot;,
+    &quot;message&quot;: &quot;payment provider timeout during checkout&quot;,
+    &quot;status&quot;: &quot;200&quot;,
+    &quot;trace_id&quot;: &quot;trace-0006&quot;
+  }
+]</pre></details>
+<details open><summary>spl-error-rate: 1 rows</summary><pre>[
+  {
+    &quot;count&quot;: &quot;1&quot;,
+    &quot;message&quot;: &quot;payment provider timeout during checkout&quot;,
+    &quot;status&quot;: &quot;500&quot;
+  }
+]</pre></details>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "queries": [
+    {
+      "id": "spl-latency-spike",
+      "purpose": "Find checkout latency spikes above 750 ms.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" latency_ms>750 | table _time trace_id status latency_ms message"
+    },
+    {
+      "id": "spl-error-rate",
+      "purpose": "Find checkout HTTP errors during the incident window.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" status>=500 | stats count by status message"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "files": [
+    {
+      "path": "investigation.json",
+      "sha256": "e0e0004a903fa622a63504873be60a86832f0d365e054a497130d9832d6f9f40",
+      "size_bytes": 26665
+    },
+    {
+      "path": "kubernetes/telemetry-generator.log",
+      "sha256": "71e42d084cde581a79f33f426f20ccddeeb1ded0e4b743b7ae687cabffbd98a1",
+      "size_bytes": 2382
+    },
+    {
+      "path": "raw/events.jsonl",
+      "sha256": "8fa84c174e28221066d17e40a5b8650cd6bb219411c675c940a49fee801a61ee",
+      "size_bytes": 2334
+    },
+    {
+      "path": "raw/kubernetes-splunk-results.json",
+      "sha256": "eb878b95f85d3728fa5d68bd3f4832b7cef5264eec228e7d87389e60aae0d5c7",
+      "size_bytes": 2290
+    },
+    {
+      "path": "raw/spl-query-plan.json",
+      "sha256": "c6c7ee4dd9bc8bd3d942cd609f0b4f7f3a7474049c23ee4dac0df376c0cdc154",
+      "size_bytes": 628
+    },
+    {
+      "path": "raw/splunk-rest-results.json",
+      "sha256": "d6753d28480de3128d1a2a419c8daa1a859f0581d4da08e8d96c35ccf7547268",
+      "size_bytes": 1519
+    },
+    {
+      "path": "report.html",
+      "sha256": "4d29aafe814c3c09d89f84180a802df95fbaa011d59721461493e0a711b48f58",
+      "size_bytes": 6323
+    },
+    {
+      "path": "report.md",
+      "sha256": "ec52b80760e1acee515770a0484e1b69f09bb29d3a64337e2c06bfcfed7f8ab0",
+      "size_bytes": 2541
+    }
+  ],
+  "generated_at": "2026-10-08T21:28:51.837613+00:00",
+  "schema_version": "splunk-incident-lab.manifest.v1"
+}

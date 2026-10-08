@@ -1,0 +1,675 @@
+{
+  "findings": [
+    {
+      "evidence_event_ids": [
+        "event-006",
+        "event-007",
+        "event-008"
+      ],
+      "evidence_query_ids": [
+        "spl-latency-spike",
+        "spl-error-rate"
+      ],
+      "hypothesis": "The incident is consistent with a downstream payment provider timeout affecting checkout latency and one failed request.",
+      "id": "finding-checkout-provider-timeout",
+      "observation": "3 checkout events exceeded 750 ms; 1 returned HTTP 5xx.",
+      "severity": "high",
+      "uncertainty": "Synthetic ground truth indicates provider timeout; live Splunk confirmation still depends on running the Docker lab and ingesting these events."
+    }
+  ],
+  "llm_analysis": {
+    "analysis": {
+      "caveats": [
+        "Some evidence appears to be from a synthetic lab. The finding explicitly notes that live Splunk confirmation depends on running the Docker lab and ingesting these events. Treat the current result as potentially synthetic until validated in production logs.",
+        "Sample size is small: 3 slow events out of 12 total events and 1 error. This limits statistical certainty about a broader service-wide outage.",
+        "Two of the slow events returned HTTP 200 despite the 'payment provider timeout during checkout' message; this may indicate local handling/fallback logic that masks provider errors or that the message text is logged regardless of final status. Full trace/span inspection is required to interpret these cases.",
+        "Do not assume additional systems or facts not present in the evidence (e.g., other downstream services, SLA breaches, user impact beyond these events) without further data."
+      ],
+      "confidence": 0.7,
+      "likely_cause": "Timeouts contacting the payment provider during checkout (as indicated by the event messages), producing three high-latency checkout requests and one 5xx response.",
+      "recommended_actions": [
+        {
+          "action": "Correlate full distributed traces for trace-0006, trace-0007, and trace-0008.",
+          "rationale": "Confirm where time was spent (client vs. payment-provider network vs. provider processing) and verify that the payment-provider call is the span causing the latency/failure."
+        },
+        {
+          "action": "Check the payment provider\u2019s status and logs for the incident timeframe and contact the provider if they report degraded service.",
+          "rationale": "The event messages explicitly reference a payment provider timeout; provider-side confirmation can validate the root cause."
+        },
+        {
+          "action": "Re-run and expand the provided Splunk queries (spl-latency-spike and spl-error-rate) across a wider time window and ensure the lab/ingest pipeline is running.",
+          "rationale": "Current results appear to come from a synthetic lab; expanding the window and confirming ingestion will reveal whether the issue is transient or recurring and will validate the findings in live data."
+        },
+        {
+          "action": "Inspect checkout-api\u2019s timeout and retry logic for payment-provider calls and review recent deployments/changes to that code or config.",
+          "rationale": "If provider timeouts are a cause, ensure the client\u2019s timeouts, retries, and circuit-breaker behavior are appropriate to avoid cascading failures and to produce correct status codes/observability."
+        },
+        {
+          "action": "Create/adjust monitoring and alerts to detect payment-provider latency and error increases (e.g., percentiles, count of >750 ms, 5xx rate) and tie alerts to the relevant trace IDs.",
+          "rationale": "Faster detection of recurrence will reduce user impact and provide traces immediately for investigation."
+        },
+        {
+          "action": "If provider outage is confirmed, implement mitigation steps (provider failover if available, user-facing messaging and graceful retries) according to the product\u2019s operational playbook.",
+          "rationale": "Mitigations reduce user impact while the provider issue is resolved."
+        }
+      ],
+      "summary": {
+        "hypothesis": "A downstream payment provider timeout occurred during the incident window and caused elevated checkout latency for three requests and one HTTP 5xx failure.",
+        "observations": [
+          "Splunk query 'spl-latency-spike' returned 3 checkout events with latency_ms 1030, 1180, and 920 (trace_ids: trace-0008, trace-0007, trace-0006). All three events include the message 'payment provider timeout during checkout'.",
+          "Of the three slow events, two have status 200 (trace-0008, trace-0006) and one has status 500 (trace-0007).",
+          "Metrics show baseline median latency 101 ms, max_latency_ms 1180 ms, event_count 12, slow_event_count 3, and error_event_count 1.",
+          "The finding supplied with the evidence states the same hypothesis: 'The incident is consistent with a downstream payment provider timeout affecting checkout latency and one failed request.'",
+          "The evidence source includes a note that the synthetic ground truth indicates a provider timeout and that live Splunk confirmation depends on running the Docker lab and ingesting these events."
+        ]
+      }
+    },
+    "mode": "llm-provider",
+    "model": "gpt-5-mini",
+    "provider_endpoint": "https://api.openai.com/v1",
+    "safety": "Retrieved evidence was supplied to the model; unsupported claims remain disallowed by prompt contract.",
+    "summary": "{\"hypothesis\": \"A downstream payment provider timeout occurred during the incident window and caused elevated checkout latency for three requests and one HTTP 5xx failure.\", \"observations\": [\"Splunk query 'spl-latency-spike' returned 3 checkout events with latency_ms 1030, 1180, and 920 (trace_ids: trace-0008, trace-0007, trace-0006). All three events include the message 'payment provider timeout during checkout'.\", \"Of the three slow events, two have status 200 (trace-0008, trace-0006) and one has status 500 (trace-0007).\", \"Metrics show baseline median latency 101 ms, max_latency_ms 1180 ms, event_count 12, slow_event_count 3, and error_event_count 1.\", \"The finding supplied with the evidence states the same hypothesis: 'The incident is consistent with a downstream payment provider timeout affecting checkout latency and one failed request.'\", \"The evidence source includes a note that the synthetic ground truth indicates a provider timeout and that live Splunk confirmation depends on running the Docker lab and ingesting these events.\"]}"
+  },
+  "metrics": {
+    "baseline_latency_ms_median": 101,
+    "error_event_count": 1,
+    "event_count": 12,
+    "max_latency_ms": 1180,
+    "slow_event_count": 3
+  },
+  "mode": "rest",
+  "queries": [
+    {
+      "id": "spl-latency-spike",
+      "purpose": "Find checkout latency spikes above 750 ms.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" latency_ms>750 | table _time trace_id status latency_ms message"
+    },
+    {
+      "id": "spl-error-rate",
+      "purpose": "Find checkout HTTP errors during the incident window.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" status>=500 | stats count by status message"
+    }
+  ],
+  "schema_version": "splunk-incident-lab.v1",
+  "splunk_ingest": {
+    "event_count": 12,
+    "index": "main",
+    "source": "splunk-incident-lab:checkout",
+    "sourcetype": "_json"
+  },
+  "splunk_readiness": {
+    "auth": "basic",
+    "license_info": {
+      "entry": [
+        {
+          "acl": {
+            "app": "",
+            "can_list": true,
+            "can_write": true,
+            "modifiable": false,
+            "owner": "system",
+            "perms": {
+              "read": [
+                "admin",
+                "splunk-system-role"
+              ],
+              "write": [
+                "admin",
+                "splunk-system-role"
+              ]
+            },
+            "removable": false,
+            "sharing": "system"
+          },
+          "author": "system",
+          "content": {
+            "add_ons": {
+              "hadoop": {
+                "erp_type": "report",
+                "guid": "6F416E61-B40E-461C-A782-CBC186E98133",
+                "maxNodes": "200"
+              }
+            },
+            "allowedRoles": [],
+            "assignableRoles": [],
+            "creation_time": 1571036400,
+            "disabled_features": [],
+            "eai:acl": null,
+            "expiration_time": 1796678129,
+            "features": [
+              "Acceleration",
+              "AdvancedSearchCommands",
+              "AdvancedXML",
+              "Alerting",
+              "AllowDuplicateKeys",
+              "ArchiveToHdfs",
+              "Auth",
+              "ConditionalLicensingEnforcement",
+              "CustomRoles",
+              "DeployClient",
+              "DeployServer",
+              "DistSearch",
+              "FwdData",
+              "GuestPass",
+              "KVStore",
+              "LDAPAuth",
+              "LocalSearch",
+              "MultifactorAuth",
+              "MultisiteClustering",
+              "NontableLookups",
+              "RcvData",
+              "RcvSearch",
+              "RollingWindowAlerts",
+              "SAMLAuth",
+              "ScheduledAlerts",
+              "ScheduledReports",
+              "ScheduledSearch",
+              "ScriptedAuth",
+              "SearchheadPooling",
+              "SigningProcessor",
+              "SplunkWeb",
+              "SyslogOutputProcessor",
+              "UnisiteClustering"
+            ],
+            "group_id": "Trial",
+            "guid": "6F416E61-B40E-461C-A782-CBC186E98133",
+            "is_unlimited": false,
+            "label": "Splunk Enterprise   Splunk Analytics for Hadoop Download Trial",
+            "license_hash": "5C52DA5145AD67B8188604C49962D12F2C3B2CF1B82A6878E46F68CA2812807B",
+            "max_retention_size": 0,
+            "max_stack_quota": 18446744073709552000,
+            "max_users": 0,
+            "max_violations": 5,
+            "notes": "",
+            "quota": 524288000,
+            "relative_expiration_interval": 5184000,
+            "relative_expiration_start": 1791494129,
+            "sourcetypes": [],
+            "stack_id": "download-trial",
+            "status": "VALID",
+            "subgroup_id": "Production",
+            "type": "download-trial",
+            "window_period": 30
+          },
+          "id": "https://localhost:8089/services/licenser/licenses/5C52DA5145AD67B8188604C49962D12F2C3B2CF1B82A6878E46F68CA2812807B",
+          "links": {
+            "alternate": "/services/licenser/licenses/5C52DA5145AD67B8188604C49962D12F2C3B2CF1B82A6878E46F68CA2812807B",
+            "edit": "/services/licenser/licenses/5C52DA5145AD67B8188604C49962D12F2C3B2CF1B82A6878E46F68CA2812807B",
+            "list": "/services/licenser/licenses/5C52DA5145AD67B8188604C49962D12F2C3B2CF1B82A6878E46F68CA2812807B"
+          },
+          "name": "5C52DA5145AD67B8188604C49962D12F2C3B2CF1B82A6878E46F68CA2812807B",
+          "updated": "1970-01-01T00:00:00+00:00"
+        },
+        {
+          "acl": {
+            "app": "",
+            "can_list": true,
+            "can_write": true,
+            "modifiable": false,
+            "owner": "system",
+            "perms": {
+              "read": [
+                "admin",
+                "splunk-system-role"
+              ],
+              "write": [
+                "admin",
+                "splunk-system-role"
+              ]
+            },
+            "removable": false,
+            "sharing": "system"
+          },
+          "author": "system",
+          "content": {
+            "add_ons": null,
+            "allowedRoles": [],
+            "assignableRoles": [],
+            "creation_time": 1277017200,
+            "disabled_features": [
+              "Acceleration",
+              "AdvancedSearchCommands",
+              "AdvancedXML",
+              "ArchiveToHdfs",
+              "ConditionalLicensingEnforcement",
+              "CustomRoles",
+              "GuestPass",
+              "KVStore",
+              "LDAPAuth",
+              "MultifactorAuth",
+              "MultisiteClustering",
+              "NontableLookups",
+              "RollingWindowAlerts",
+              "SAMLAuth",
+              "ScheduledAlerts",
+              "ScheduledReports",
+              "ScriptedAuth",
+              "SearchheadPooling",
+              "UnisiteClustering"
+            ],
+            "eai:acl": null,
+            "expiration_time": 2147483647,
+            "features": [
+              "Auth",
+              "DeployClient",
+              "FwdData",
+              "RcvData",
+              "SigningProcessor",
+              "SplunkWeb",
+              "SyslogOutputProcessor"
+            ],
+            "group_id": "Forwarder",
+            "guid": "11111111-1111-1111-1111-111111111111",
+            "is_unlimited": false,
+            "label": "Splunk Forwarder",
+            "license_hash": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD",
+            "max_retention_size": 0,
+            "max_stack_quota": 18446744073709552000,
+            "max_users": 4294967295,
+            "max_violations": 5,
+            "notes": "",
+            "quota": 1048576,
+            "relative_expiration_interval": 0,
+            "relative_expiration_start": 0,
+            "sourcetypes": [],
+            "stack_id": "forwarder",
+            "status": "VALID",
+            "subgroup_id": "Production",
+            "type": "forwarder",
+            "window_period": 30
+          },
+          "id": "https://localhost:8089/services/licenser/licenses/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD",
+          "links": {
+            "alternate": "/services/licenser/licenses/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD",
+            "edit": "/services/licenser/licenses/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD",
+            "list": "/services/licenser/licenses/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD"
+          },
+          "name": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFD",
+          "updated": "1970-01-01T00:00:00+00:00"
+        },
+        {
+          "acl": {
+            "app": "",
+            "can_list": true,
+            "can_write": true,
+            "modifiable": false,
+            "owner": "system",
+            "perms": {
+              "read": [
+                "admin",
+                "splunk-system-role"
+              ],
+              "write": [
+                "admin",
+                "splunk-system-role"
+              ]
+            },
+            "removable": false,
+            "sharing": "system"
+          },
+          "author": "system",
+          "content": {
+            "add_ons": null,
+            "allowedRoles": [],
+            "assignableRoles": [],
+            "creation_time": 1277017200,
+            "disabled_features": [
+              "Acceleration",
+              "AdvancedSearchCommands",
+              "AdvancedXML",
+              "ArchiveToHdfs",
+              "ConditionalLicensingEnforcement",
+              "CustomRoles",
+              "GuestPass",
+              "LDAPAuth",
+              "MultifactorAuth",
+              "MultisiteClustering",
+              "NontableLookups",
+              "RollingWindowAlerts",
+              "SAMLAuth",
+              "ScheduledAlerts",
+              "ScheduledReports",
+              "ScriptedAuth",
+              "SearchheadPooling",
+              "UnisiteClustering"
+            ],
+            "eai:acl": null,
+            "expiration_time": 2147483647,
+            "features": [
+              "FwdData",
+              "KVStore",
+              "LocalSearch",
+              "RcvData",
+              "ScheduledSearch",
+              "SigningProcessor",
+              "SplunkWeb"
+            ],
+            "group_id": "Free",
+            "guid": "00000000-0000-0000-0000-000000000000",
+            "is_unlimited": false,
+            "label": "Splunk Free",
+            "license_hash": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+            "max_retention_size": 0,
+            "max_stack_quota": 18446744073709552000,
+            "max_users": 4294967295,
+            "max_violations": 3,
+            "notes": "",
+            "quota": 524288000,
+            "relative_expiration_interval": 0,
+            "relative_expiration_start": 0,
+            "sourcetypes": [],
+            "stack_id": "free",
+            "status": "VALID",
+            "subgroup_id": "Production",
+            "type": "free",
+            "window_period": 30
+          },
+          "id": "https://localhost:8089/services/licenser/licenses/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+          "links": {
+            "alternate": "/services/licenser/licenses/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+            "edit": "/services/licenser/licenses/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+            "list": "/services/licenser/licenses/FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
+          },
+          "name": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+          "updated": "1970-01-01T00:00:00+00:00"
+        }
+      ],
+      "generator": {
+        "build": "c1c0c3ccd7cb",
+        "version": "10.0.11"
+      },
+      "links": {
+        "create": "/services/licenser/licenses/_new"
+      },
+      "messages": [],
+      "origin": "https://localhost:8089/services/licenser/licenses",
+      "paging": {
+        "offset": 0,
+        "perPage": 30,
+        "total": 3
+      },
+      "updated": "2026-10-08T21:15:38+00:00"
+    },
+    "rest_api": "https://localhost:8089",
+    "server_info": {
+      "entry": [
+        {
+          "acl": {
+            "app": "",
+            "can_list": true,
+            "can_write": true,
+            "modifiable": false,
+            "owner": "system",
+            "perms": {
+              "read": [
+                "*"
+              ],
+              "write": []
+            },
+            "removable": false,
+            "sharing": "system"
+          },
+          "author": "system",
+          "content": {
+            "activeLicenseGroup": "Trial",
+            "activeLicenseSubgroup": "Production",
+            "addOns": {
+              "hadoop": {
+                "parameters": {
+                  "erp_type": "report",
+                  "guid": "6F416E61-B40E-461C-A782-CBC186E98133",
+                  "maxNodes": "200"
+                },
+                "type": "external_results_provider"
+              }
+            },
+            "build": "c1c0c3ccd7cb",
+            "cgroups_version": "V2",
+            "conf_generation": 10,
+            "cpu_arch": "x86_64",
+            "eai:acl": null,
+            "federated_search_enabled": true,
+            "fips_mode": false,
+            "guid": "3A47A974-899F-435B-AA19-E33861609A8F",
+            "health_info": "green",
+            "health_version": 3684657794,
+            "host": "a28e508b60e5",
+            "host_fqdn": "a28e508b60e5",
+            "host_resolved": "a28e508b60e5",
+            "isConverged": false,
+            "isForwarding": false,
+            "isFree": false,
+            "isTrial": true,
+            "kvStoreStatus": "ready",
+            "licenseKeys": [
+              "5C52DA5145AD67B8188604C49962D12F2C3B2CF1B82A6878E46F68CA2812807B"
+            ],
+            "licenseSignature": "cc96e14ca7e93e5d0f4fed6d4b6cde02",
+            "licenseState": "OK",
+            "license_labels": [
+              "Splunk Enterprise   Splunk Analytics for Hadoop Download Trial"
+            ],
+            "manager_guid": "3A47A974-899F-435B-AA19-E33861609A8F",
+            "manager_uri": "self",
+            "master_guid": "3A47A974-899F-435B-AA19-E33861609A8F",
+            "master_uri": "self",
+            "max_users": 4294967295,
+            "mode": "normal",
+            "numberOfCores": 16,
+            "numberOfVirtualCores": 16,
+            "os_build": "#1 SMP PREEMPT_DYNAMIC Fri Nov 29 17:24:06 UTC 2024",
+            "os_name": "Linux",
+            "os_name_extended": "Linux",
+            "os_version": "6.10.14-linuxkit",
+            "physicalMemoryMB": 7837,
+            "product_type": "enterprise",
+            "rtsearch_enabled": true,
+            "serverName": "a28e508b60e5",
+            "server_roles": [
+              "indexer",
+              "license_master",
+              "license_manager",
+              "kv_store"
+            ],
+            "shutting_down": "0",
+            "startup_time": 1791494099,
+            "staticAssetId": "E91841BC6C780AEEA0CB9B3C0F626DFA91BC808F3F2B8CEEA4530D6A12BAAAC4",
+            "version": "10.0.11",
+            "versionControlEnabled": true
+          },
+          "id": "https://localhost:8089/services/server/info/server-info",
+          "links": {
+            "alternate": "/services/server/info/server-info",
+            "list": "/services/server/info/server-info"
+          },
+          "name": "server-info",
+          "updated": "1970-01-01T00:00:00+00:00"
+        }
+      ],
+      "generator": {
+        "build": "c1c0c3ccd7cb",
+        "version": "10.0.11"
+      },
+      "links": {},
+      "messages": [],
+      "origin": "https://localhost:8089/services/server/info",
+      "paging": {
+        "offset": 0,
+        "perPage": 30,
+        "total": 1
+      },
+      "updated": "2026-10-08T21:15:38+00:00"
+    }
+  },
+  "splunk_rest_results": [
+    {
+      "purpose": "Find checkout latency spikes above 750 ms.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" latency_ms>750 | table _time trace_id status latency_ms message",
+      "query_id": "spl-latency-spike",
+      "rows": [
+        {
+          "_time": "2026-10-08T21:15:39.000+00:00",
+          "latency_ms": "1030",
+          "message": "payment provider timeout during checkout",
+          "status": "200",
+          "trace_id": "trace-0008"
+        },
+        {
+          "_time": "2026-10-08T21:15:39.000+00:00",
+          "latency_ms": "1180",
+          "message": "payment provider timeout during checkout",
+          "status": "500",
+          "trace_id": "trace-0007"
+        },
+        {
+          "_time": "2026-10-08T21:15:39.000+00:00",
+          "latency_ms": "920",
+          "message": "payment provider timeout during checkout",
+          "status": "200",
+          "trace_id": "trace-0006"
+        }
+      ]
+    },
+    {
+      "purpose": "Find checkout HTTP errors during the incident window.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" status>=500 | stats count by status message",
+      "query_id": "spl-error-rate",
+      "rows": [
+        {
+          "count": "1",
+          "message": "payment provider timeout during checkout",
+          "status": "500"
+        }
+      ]
+    }
+  ],
+  "splunk_result_verification": {
+    "actual_error_row_count": 1,
+    "actual_slow_event_count": 3,
+    "expected_error_event_count": 1,
+    "expected_slow_event_count": 3,
+    "matches_expected_incident_shape": true
+  },
+  "timeline": [
+    {
+      "endpoint": "/checkout",
+      "id": "event-000",
+      "latency_ms": 90,
+      "message": "checkout request completed",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:00:00Z",
+      "trace_id": "trace-0000"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-001",
+      "latency_ms": 101,
+      "message": "checkout request completed",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:01:00Z",
+      "trace_id": "trace-0001"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-002",
+      "latency_ms": 112,
+      "message": "checkout request completed",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:02:00Z",
+      "trace_id": "trace-0002"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-003",
+      "latency_ms": 123,
+      "message": "checkout request completed",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:03:00Z",
+      "trace_id": "trace-0003"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-004",
+      "latency_ms": 90,
+      "message": "checkout request completed",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:04:00Z",
+      "trace_id": "trace-0004"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-005",
+      "latency_ms": 101,
+      "message": "checkout request completed",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:05:00Z",
+      "trace_id": "trace-0005"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-006",
+      "latency_ms": 920,
+      "message": "payment provider timeout during checkout",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:06:00Z",
+      "trace_id": "trace-0006"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-007",
+      "latency_ms": 1180,
+      "message": "payment provider timeout during checkout",
+      "service": "checkout-api",
+      "status": 500,
+      "timestamp": "2026-10-08T14:07:00Z",
+      "trace_id": "trace-0007"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-008",
+      "latency_ms": 1030,
+      "message": "payment provider timeout during checkout",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:08:00Z",
+      "trace_id": "trace-0008"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-009",
+      "latency_ms": 101,
+      "message": "checkout request completed",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:09:00Z",
+      "trace_id": "trace-0009"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-010",
+      "latency_ms": 112,
+      "message": "checkout request completed",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:10:00Z",
+      "trace_id": "trace-0010"
+    },
+    {
+      "endpoint": "/checkout",
+      "id": "event-011",
+      "latency_ms": 123,
+      "message": "checkout request completed",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:11:00Z",
+      "trace_id": "trace-0011"
+    }
+  ]
+}

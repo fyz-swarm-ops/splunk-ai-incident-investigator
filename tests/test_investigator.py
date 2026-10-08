@@ -1,0 +1,242 @@
+from __future__ import annotations
+
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import subprocess
+import sys
+from threading import Thread
+import time
+from urllib import request
+import zipfile
+
+from splunk_incident_lab.evidence import write_reports
+from splunk_incident_lab.investigator import build_investigation, investigate_local, verify_splunk_results
+from splunk_incident_lab.llm import LlmConfig, analyze_with_llm
+from splunk_incident_lab.scenario import write_events
+from splunk_incident_lab.splunk_client import (
+    SplunkAuthenticationError,
+    SplunkResponseError,
+    SplunkRestClient,
+    parse_oneshot_results,
+)
+
+
+def test_investigation_finds_injected_checkout_incident(tmp_path):
+    events = tmp_path / "raw" / "events.jsonl"
+    write_events(events)
+
+    investigation = investigate_local(events)
+
+    assert investigation["metrics"]["event_count"] == 12
+    assert investigation["metrics"]["slow_event_count"] == 3
+    assert investigation["metrics"]["error_event_count"] == 1
+    finding = investigation["findings"][0]
+    assert finding["severity"] == "high"
+    assert finding["evidence_event_ids"]
+    assert "uncertainty" in finding
+
+
+def test_evidence_package_contains_raw_queries_and_reports(tmp_path):
+    events = tmp_path / "raw" / "events.jsonl"
+    write_events(events)
+    investigation = investigate_local(events)
+
+    outputs = write_reports(tmp_path, investigation)
+
+    assert tmp_path / "manifest.json" in outputs
+    assert (tmp_path / "report.html").exists()
+    assert (tmp_path / "report.md").exists()
+    assert (tmp_path / "investigation.json").exists()
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert any(item["path"] == "raw/spl-query-plan.json" for item in manifest["files"])
+    assert not any(item["path"] == "splunk-incident-evidence.zip" for item in manifest["files"])
+    with zipfile.ZipFile(tmp_path / "splunk-incident-evidence.zip") as archive:
+        assert "investigation.json" in archive.namelist()
+        assert "raw/spl-query-plan.json" in archive.namelist()
+
+
+def test_rest_mode_uncertainty_distinguishes_real_splunk_from_local(tmp_path):
+    events = tmp_path / "raw" / "events.jsonl"
+    written = write_events(events)
+    splunk_results = [
+        {
+            "query_id": "spl-latency-spike",
+            "rows": [{"trace_id": "trace-0006"}, {"trace_id": "trace-0007"}, {"trace_id": "trace-0008"}],
+        },
+        {"query_id": "spl-error-rate", "rows": [{"status": "500", "count": "1"}]},
+    ]
+
+    investigation = build_investigation(written, "rest", splunk_rest_results=splunk_results)
+
+    uncertainty = investigation["findings"][0]["uncertainty"]
+    assert "ingested into real Splunk" in uncertainty
+    assert "Local-only" not in uncertainty
+
+
+def test_splunk_result_verification_matches_expected_shape():
+    results = [
+        {
+            "query_id": "spl-latency-spike",
+            "rows": [{"trace_id": "trace-0006"}, {"trace_id": "trace-0007"}, {"trace_id": "trace-0008"}],
+        },
+        {"query_id": "spl-error-rate", "rows": [{"status": "500", "count": "1"}]},
+    ]
+
+    verification = verify_splunk_results(results)
+
+    assert verification["matches_expected_incident_shape"] is True
+
+
+def test_splunk_search_empty_results_are_valid():
+    assert parse_oneshot_results(b'{"results": []}') == []
+
+
+def test_splunk_search_malformed_response_fails():
+    try:
+        parse_oneshot_results(b"{not-json")
+    except SplunkResponseError as exc:
+        assert "malformed" in str(exc)
+    else:
+        raise AssertionError("expected malformed Splunk response to fail")
+
+
+def test_splunk_authentication_failure_is_explicit():
+    server = _start_server(_SplunkAuthFailureHandler)
+    try:
+        client = SplunkRestClient(f"http://127.0.0.1:{server.server_port}", "admin", "bad")
+        try:
+            client.verify_ready()
+        except SplunkAuthenticationError as exc:
+            assert "authentication failed" in str(exc)
+        else:
+            raise AssertionError("expected auth failure")
+    finally:
+        server.shutdown()
+
+
+def test_splunk_successful_query_round_trip():
+    server = _start_server(_SplunkSuccessHandler)
+    try:
+        client = SplunkRestClient(f"http://127.0.0.1:{server.server_port}", "admin", "ok")
+        rows = client.run_search("search index=main")
+        assert rows == [{"trace_id": "trace-0006", "latency_ms": "920"}]
+    finally:
+        server.shutdown()
+
+
+def test_llm_analysis_uses_configured_provider():
+    server = _start_server(_LlmSuccessHandler)
+    try:
+        analysis = analyze_with_llm(
+            LlmConfig(endpoint=f"http://127.0.0.1:{server.server_port}", api_key="test", model="incident-model"),
+            {"metrics": {"slow_event_count": 3}},
+        )
+    finally:
+        server.shutdown()
+
+    assert analysis["mode"] == "llm-provider"
+    assert analysis["analysis"]["likely_cause"] == "payment provider timeout"
+
+
+def test_evidence_ui_serves_queries_findings_timeline_and_evidence(tmp_path):
+    events = tmp_path / "raw" / "events.jsonl"
+    write_events(events)
+    write_reports(tmp_path, investigate_local(events))
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "splunk_incident_lab.cli",
+            "serve",
+            "--evidence",
+            str(tmp_path),
+            "--port",
+            "0",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        line = proc.stdout.readline().strip()
+        assert line.startswith("serving evidence UI at ")
+        base_url = line.removeprefix("serving evidence UI at ")
+        for path, marker in [
+            ("/", "Evidence Navigation"),
+            ("/api/queries", "spl-latency-spike"),
+            ("/api/findings", "finding-checkout-provider-timeout"),
+            ("/api/timeline", "trace-0007"),
+            ("/api/evidence", "bounded-template"),
+        ]:
+            with request.urlopen(f"{base_url}{path}", timeout=5) as response:
+                assert response.status == 200
+                assert marker in response.read().decode("utf-8")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
+def _start_server(handler: type[BaseHTTPRequestHandler]) -> HTTPServer:
+    server = HTTPServer(("127.0.0.1", 0), handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+class _SplunkAuthFailureHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(401)
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+
+class _SplunkSuccessHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        assert self.path.startswith("/services/search/jobs/oneshot")
+        body = b'{"results":[{"trace_id":"trace-0006","latency_ms":"920"}]}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass
+
+
+class _LlmSuccessHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        assert self.path == "/chat/completions"
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "summary": "Checkout latency and errors match supplied evidence.",
+                                "likely_cause": "payment provider timeout",
+                                "confidence": "medium",
+                                "recommended_actions": ["check provider connectivity"],
+                                "caveats": ["synthetic evidence"],
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass

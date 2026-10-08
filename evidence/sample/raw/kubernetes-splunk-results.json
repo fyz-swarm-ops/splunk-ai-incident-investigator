@@ -1,0 +1,60 @@
+{
+  "queries": [
+    {
+      "id": "k8s-latency-spike",
+      "purpose": "Find Kubernetes-generated checkout latency spikes above 750 ms.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search trace_id=\"k8s-*\" latency_ms>750 | table _time trace_id status latency_ms message host"
+    },
+    {
+      "id": "k8s-error-rate",
+      "purpose": "Find Kubernetes-generated checkout HTTP errors.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search trace_id=\"k8s-*\" status>=500 | stats count by status message host"
+    }
+  ],
+  "results": [
+    {
+      "purpose": "Find Kubernetes-generated checkout latency spikes above 750 ms.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search trace_id=\"k8s-*\" latency_ms>750 | table _time trace_id status latency_ms message host",
+      "query_id": "k8s-latency-spike",
+      "rows": [
+        {
+          "_time": "2026-10-08T21:17:05.000+00:00",
+          "host": "kind-telemetry-generator",
+          "latency_ms": "1030",
+          "message": "payment provider timeout during checkout",
+          "status": "200",
+          "trace_id": "k8s-trace-0008"
+        },
+        {
+          "_time": "2026-10-08T21:17:05.000+00:00",
+          "host": "kind-telemetry-generator",
+          "latency_ms": "1180",
+          "message": "payment provider timeout during checkout",
+          "status": "500",
+          "trace_id": "k8s-trace-0007"
+        },
+        {
+          "_time": "2026-10-08T21:17:05.000+00:00",
+          "host": "kind-telemetry-generator",
+          "latency_ms": "920",
+          "message": "payment provider timeout during checkout",
+          "status": "200",
+          "trace_id": "k8s-trace-0006"
+        }
+      ]
+    },
+    {
+      "purpose": "Find Kubernetes-generated checkout HTTP errors.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search trace_id=\"k8s-*\" status>=500 | stats count by status message host",
+      "query_id": "k8s-error-rate",
+      "rows": [
+        {
+          "count": "1",
+          "host": "kind-telemetry-generator",
+          "message": "payment provider timeout during checkout",
+          "status": "500"
+        }
+      ]
+    }
+  ]
+}

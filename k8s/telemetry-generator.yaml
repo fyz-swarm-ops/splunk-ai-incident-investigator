@@ -1,0 +1,84 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: checkout-telemetry-generator
+  namespace: splunk-incident-lab
+spec:
+  schedule: "*/5 * * * *"
+  suspend: true
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: generator
+              image: python:3.11-slim
+              env:
+                - name: SPLUNKD_URL
+                  value: "https://host.docker.internal:8089"
+                - name: SPLUNK_USERNAME
+                  value: "admin"
+                - name: SPLUNK_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: splunk-incident-lab-splunk
+                      key: password
+                      optional: true
+              command: ["python", "-c"]
+              args:
+                - |
+                  import base64
+                  import json
+                  import os
+                  import ssl
+                  import urllib.parse
+                  import urllib.request
+
+                  splunkd_url = os.environ.get("SPLUNKD_URL", "").rstrip("/")
+                  username = os.environ.get("SPLUNK_USERNAME", "admin")
+                  password = os.environ.get("SPLUNK_PASSWORD")
+                  auth = ""
+                  if username and password:
+                      token = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+                      auth = f"Basic {token}"
+
+                  def send_to_splunk(event):
+                      if not splunkd_url or not auth:
+                          return
+                      params = urllib.parse.urlencode({
+                          "index": "main",
+                          "source": "splunk-incident-lab:checkout",
+                          "sourcetype": "_json",
+                          "host": "kind-telemetry-generator",
+                          "output_mode": "json",
+                      })
+                      request = urllib.request.Request(
+                          f"{splunkd_url}/services/receivers/simple?{params}",
+                          data=json.dumps(event, sort_keys=True).encode(),
+                          method="POST",
+                          headers={"Authorization": auth, "Content-Type": "application/json"},
+                      )
+                      context = ssl._create_unverified_context()
+                      with urllib.request.urlopen(request, timeout=10, context=context) as response:
+                          response.read()
+
+                  for minute in range(12):
+                      latency = 90 + (minute % 4) * 11
+                      status = 200
+                      message = "checkout request completed"
+                      if 6 <= minute <= 8:
+                          latency = [920, 1180, 1030][minute - 6]
+                          status = 500 if minute == 7 else 200
+                          message = "payment provider timeout during checkout"
+                      event = {
+                          "timestamp": f"2026-10-08T14:{minute:02d}:00Z",
+                          "service": "checkout-api",
+                          "endpoint": "/checkout",
+                          "status": status,
+                          "latency_ms": latency,
+                          "trace_id": f"k8s-trace-{minute:04d}",
+                          "message": message,
+                      }
+                      send_to_splunk(event)
+                      print(json.dumps(event, sort_keys=True))
