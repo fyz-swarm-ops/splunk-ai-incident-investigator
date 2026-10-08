@@ -16,7 +16,7 @@ lab-up:
 	SPLUNK_PASSWORD="$(SPLUNK_PASSWORD)" docker compose -f compose/splunk.yml up -d
 
 lab-down:
-	docker compose -f compose/splunk.yml down -v --remove-orphans
+	SPLUNK_PASSWORD="$(SPLUNK_PASSWORD)" docker compose -f compose/splunk.yml down -v --remove-orphans
 
 lab-seed:
 	$(PYTHON) -m splunk_incident_lab.cli seed --output $(EVIDENCE_DIR)/raw/events.jsonl
