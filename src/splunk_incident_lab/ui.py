@@ -31,15 +31,17 @@ def serve_evidence(evidence_dir: Path, host: str, port: int) -> None:
                 return
             if parsed.path == "/api/evidence":
                 investigation = _load_investigation(evidence_dir)
-                self._send_json(
-                    {
-                        "mode": investigation["mode"],
-                        "llm_analysis": investigation["llm_analysis"],
-                        "lifecycle": investigation.get("lifecycle"),
-                        "splunk_rest_results": investigation.get("splunk_rest_results", []),
-                        "splunk_result_verification": investigation.get("splunk_result_verification"),
-                    }
-                )
+                payload = {
+                    "mode": investigation["mode"],
+                    "llm_analysis": investigation["llm_analysis"],
+                    "splunk_rest_results": investigation.get("splunk_rest_results", []),
+                    "splunk_result_verification": investigation.get("splunk_result_verification"),
+                }
+                if "advisory_workflow" in investigation:
+                    payload["advisory_workflow"] = investigation["advisory_workflow"]
+                else:
+                    payload["lifecycle"] = investigation.get("lifecycle")
+                self._send_json(payload)
                 return
             self.send_error(404, "not found")
 
@@ -68,6 +70,8 @@ def serve_evidence(evidence_dir: Path, host: str, port: int) -> None:
 
 
 def render_ui(investigation: dict) -> str:
+    if "advisory_workflow" in investigation:
+        return _render_rollback_ui(investigation)
     query_rows = "\n".join(
         "<tr>"
         f"<td><code>{escape(item['id'])}</code></td>"
@@ -163,6 +167,116 @@ pre {{ overflow: auto; padding: 12px; }}
 <p><strong>LLM safety:</strong> {escape(llm_analysis.get('safety', ''))}</p>
 </div>
 {result_blocks or '<p>No Splunk REST result rows are present in this evidence package.</p>'}
+</section>
+</main>
+</body>
+</html>
+"""
+
+
+def _render_rollback_ui(investigation: dict) -> str:
+    workflow = investigation["advisory_workflow"]
+    hypothesis_blocks = "\n".join(
+        "<section class=\"finding\">"
+        f"<h3>{item['rank']}. {escape(item['label'])}</h3>"
+        f"<p>Score: <code>{item['score']}</code> ({escape(item['support_level'])})</p>"
+        f"<p><strong>Supporting:</strong> {escape(', '.join(item['supporting_evidence_event_ids']) or 'none')}</p>"
+        f"<p><strong>Contradicting:</strong> {escape(', '.join(item['contradicting_evidence_event_ids']) or 'none')}</p>"
+        f"<p><strong>Missing:</strong> {escape(', '.join(item['missing_information']) or 'none')}</p>"
+        "</section>"
+        for item in workflow["ranked_hypotheses"]
+    )
+    query_rows = "\n".join(
+        "<tr>"
+        f"<td><code>{escape(item['id'])}</code></td>"
+        f"<td>{escape(item['purpose'])}</td>"
+        f"<td><code>{escape(item['query'])}</code></td>"
+        "</tr>"
+        for item in investigation["queries"]
+    )
+    timeline_rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(event['timestamp'])}</td>"
+        f"<td>{escape(event['signal_type'])}</td>"
+        f"<td>{escape(str(event['status']))}</td>"
+        f"<td>{escape(str(event['latency_ms']))}</td>"
+        f"<td><code>{escape(event['trace_id'])}</code></td>"
+        f"<td>{escape(event['message'])}</td>"
+        "</tr>"
+        for event in investigation["timeline"]
+    )
+    result_blocks = "\n".join(
+        "<details open>"
+        f"<summary>{escape(item['query_id'])}: {len(item.get('rows', []))} rows</summary>"
+        f"<pre>{escape(json.dumps(item.get('rows', []), indent=2, sort_keys=True))}</pre>"
+        "</details>"
+        for item in investigation.get("splunk_rest_results", [])
+    )
+    llm = investigation["llm_analysis"]
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rollback Advisory Investigator</title>
+<style>
+body {{ font-family: system-ui, sans-serif; margin: 0; color: #202124; background: #f7f9fc; }}
+main {{ max-width: 1180px; margin: 0 auto; padding: 24px; }}
+header {{ border-bottom: 1px solid #d0d7de; background: white; }}
+header div {{ max-width: 1180px; margin: 0 auto; padding: 20px 24px; }}
+nav a {{ margin-right: 16px; color: #0b57d0; }}
+section {{ margin: 24px 0; }}
+.finding, details, .panel {{ background: white; border: 1px solid #d0d7de; border-radius: 6px; padding: 14px; }}
+table {{ border-collapse: collapse; width: 100%; background: white; }}
+td, th {{ border: 1px solid #d0d7de; padding: 8px; text-align: left; vertical-align: top; }}
+th {{ background: #eef2f7; }}
+code, pre {{ background: #eef2f7; }}
+pre {{ overflow: auto; padding: 12px; }}
+</style>
+</head>
+<body>
+<header><div>
+<h1>Rollback Advisory Investigator</h1>
+<p>Mode: <code>{escape(investigation['mode'])}</code> | LLM: <code>{escape(llm['mode'])}</code></p>
+<nav>
+<a href="#brief">Brief</a>
+<a href="#queries">Queries</a>
+<a href="#findings">Hypotheses</a>
+<a href="#timeline">Timeline</a>
+<a href="#evidence">Evidence</a>
+<a href="/api/investigation">JSON</a>
+</nav>
+</div></header>
+<main>
+<section id="brief" class="panel">
+<h2>{escape(workflow['question'])}</h2>
+<p>{escape(workflow['decision_boundary'])}</p>
+<p><strong>Recommendation:</strong> {escape(workflow['advisory_recommendation'])}</p>
+<pre>{escape(json.dumps(workflow['baseline_incident_comparison'], indent=2, sort_keys=True))}</pre>
+</section>
+<section id="queries">
+<h2>Executed SPL Queries</h2>
+<table><tr><th>ID</th><th>Purpose</th><th>SPL</th></tr>{query_rows}</table>
+</section>
+<section id="findings">
+<h2>Ranked Hypotheses</h2>
+{hypothesis_blocks}
+</section>
+<section class="panel">
+<h2>Next Checks</h2>
+<ul>{''.join(f'<li>{escape(item)}</li>' for item in workflow['recommended_next_checks'])}</ul>
+<h2>Missing Information</h2>
+<ul>{''.join(f'<li>{escape(item)}</li>' for item in workflow['missing_information']) or '<li>none</li>'}</ul>
+</section>
+<section id="timeline">
+<h2>Timeline</h2>
+<table><tr><th>Time</th><th>Signal</th><th>Status</th><th>Latency ms</th><th>Trace</th><th>Message</th></tr>{timeline_rows}</table>
+</section>
+<section id="evidence">
+<h2>Evidence Navigation</h2>
+<p><strong>Recovery:</strong> {escape(workflow['follow_up_recovery_assessment']['assessment'])}</p>
+<p><strong>LLM summary:</strong> {escape(llm.get('summary', ''))}</p>
+{result_blocks or '<p>No query result rows are present in this evidence package.</p>'}
 </section>
 </main>
 </body>

@@ -8,6 +8,18 @@ from pathlib import Path
 from .evidence import EvidenceValidationError, validate_evidence_package, write_reports
 from .investigator import build_investigation, investigate_local, verify_splunk_results
 from .llm import analyze_with_llm, llm_config_from_env
+from .rollback import (
+    DEPLOYMENT_TIME,
+    ROLLBACK_CASES,
+    SERVICE,
+    build_rollback_investigation,
+    local_rollback_results,
+    query_plan_as_dicts as rollback_query_plan_as_dicts,
+    read_rollback_events,
+    rollback_query_plan,
+    verify_rollback_splunk_results,
+    write_rollback_events,
+)
 from .scenario import read_events, write_events
 from .splunk_client import SplunkRestClient
 from .ui import serve_evidence
@@ -20,6 +32,10 @@ def main() -> int:
     seed = sub.add_parser("seed")
     seed.add_argument("--output", type=Path, required=True)
 
+    seed_rollback = sub.add_parser("seed-rollback")
+    seed_rollback.add_argument("--case", choices=sorted(ROLLBACK_CASES), required=True)
+    seed_rollback.add_argument("--output", type=Path, required=True)
+
     investigate = sub.add_parser("investigate")
     investigate.add_argument("--mode", choices=["local", "rest"], default="local")
     investigate.add_argument("--events", type=Path, required=True)
@@ -27,6 +43,21 @@ def main() -> int:
 
     verify_k8s = sub.add_parser("verify-k8s")
     verify_k8s.add_argument("--output", type=Path, required=True)
+
+    rollback = sub.add_parser("investigate-rollback")
+    rollback.add_argument("--mode", choices=["local", "rest"], default="local")
+    rollback.add_argument("--events", type=Path, required=True)
+    rollback.add_argument("--output", type=Path, required=True)
+    rollback.add_argument("--service", default=SERVICE)
+    rollback.add_argument("--deployment-time", default=DEPLOYMENT_TIME)
+    rollback.add_argument("--window-minutes", type=int, default=14)
+
+    rollback_demo = sub.add_parser("demo-rollback")
+    rollback_demo.add_argument("--output", type=Path, required=True)
+    rollback_demo.add_argument("--mode", choices=["local", "rest"], default="local")
+    rollback_demo.add_argument("--service", default=SERVICE)
+    rollback_demo.add_argument("--deployment-time", default=DEPLOYMENT_TIME)
+    rollback_demo.add_argument("--window-minutes", type=int, default=14)
 
     export = sub.add_parser("export")
     export.add_argument("--evidence", type=Path, required=True)
@@ -43,6 +74,10 @@ def main() -> int:
     if args.command == "seed":
         events = write_events(args.output)
         print(f"wrote {len(events)} events to {args.output}")
+        return 0
+    if args.command == "seed-rollback":
+        events = write_rollback_events(args.case, args.output)
+        print(f"wrote {len(events)} rollback signals for {args.case} to {args.output}")
         return 0
     if args.command == "investigate":
         args.output.mkdir(parents=True, exist_ok=True)
@@ -82,6 +117,94 @@ def main() -> int:
             )
         write_reports(args.output, investigation)
         print(f"wrote investigation evidence to {args.output}")
+        return 0
+    if args.command == "investigate-rollback":
+        args.output.mkdir(parents=True, exist_ok=True)
+        records = read_rollback_events(args.events)
+        if args.mode == "rest":
+            client = SplunkRestClient(
+                os.environ.get("SPLUNKD_URL", "https://localhost:8089"),
+                os.environ.get("SPLUNK_USERNAME", "admin"),
+                os.environ["SPLUNK_PASSWORD"],
+            )
+            readiness = client.verify_ready()
+            ingest = client.ingest_json_records(args.events, source="splunk-incident-lab:rollback")
+            searches = _run_rollback_searches_until_visible(
+                client,
+                args.service,
+                args.deployment_time,
+                args.window_minutes,
+            )
+            investigation = build_rollback_investigation(
+                records,
+                service=args.service,
+                deployment_time=args.deployment_time,
+                window_minutes=args.window_minutes,
+                mode="rest",
+                splunk_rest_results=searches,
+            )
+            investigation["splunk_readiness"] = readiness
+            investigation["splunk_ingest"] = ingest
+        else:
+            searches = local_rollback_results(records, args.service, args.deployment_time, args.window_minutes)
+            investigation = build_rollback_investigation(
+                records,
+                service=args.service,
+                deployment_time=args.deployment_time,
+                window_minutes=args.window_minutes,
+                mode="local",
+                splunk_rest_results=searches,
+            )
+        llm_config = llm_config_from_env(os.environ)
+        if llm_config is not None:
+            investigation["llm_analysis"] = analyze_with_llm(
+                llm_config,
+                {
+                    "mode": investigation["mode"],
+                    "advisory_workflow": investigation["advisory_workflow"],
+                    "queries": investigation["queries"],
+                    "splunk_rest_results": investigation.get("splunk_rest_results", []),
+                    "evidence_context": _evidence_context(investigation),
+                },
+            )
+        write_reports(args.output, investigation)
+        print(f"wrote rollback advisory evidence to {args.output}")
+        return 0
+    if args.command == "demo-rollback":
+        summary = {"cases": []}
+        for case in sorted(ROLLBACK_CASES):
+            case_dir = args.output / case
+            events_path = case_dir / "raw" / "rollback-events.jsonl"
+            write_rollback_events(case, events_path)
+            records = read_rollback_events(events_path)
+            searches = local_rollback_results(records, args.service, args.deployment_time, args.window_minutes)
+            investigation = build_rollback_investigation(
+                records,
+                service=args.service,
+                deployment_time=args.deployment_time,
+                window_minutes=args.window_minutes,
+                mode=args.mode,
+                splunk_rest_results=searches,
+            )
+            write_reports(case_dir, investigation)
+            top = investigation["advisory_workflow"]["ranked_hypotheses"][0]
+            summary["cases"].append(
+                {
+                    "case": case,
+                    "top_hypothesis": top["id"],
+                    "support_level": top["support_level"],
+                    "recommendation": investigation["advisory_workflow"]["advisory_recommendation"],
+                    "evidence_dir": str(case_dir),
+                }
+            )
+        import json
+
+        args.output.mkdir(parents=True, exist_ok=True)
+        (args.output / "rollback-demo-summary.json").write_text(
+            json.dumps(summary, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"wrote rollback advisory demo to {args.output}")
         return 0
     if args.command == "verify-k8s":
         client = SplunkRestClient(
@@ -138,6 +261,16 @@ def main() -> int:
 
 
 def _evidence_context(investigation: dict) -> dict:
+    if "advisory_workflow" in investigation:
+        return {
+            "telemetry_origin": "synthetic rollback-decision scenarios without hidden answer labels in investigator inputs",
+            "splunk_path": (
+                "events ingested into real Splunk and retrieved through executed SPL over REST"
+                if investigation["mode"] == "rest"
+                else "local evidence path; executed SPL text and local result simulation are present"
+            ),
+            "claim_boundary": "ranks competing hypotheses for operator checks; it does not perform rollback actions",
+        }
     if investigation["mode"] == "rest":
         return {
             "telemetry_origin": "synthetic checkout scenario",
@@ -157,6 +290,26 @@ def _run_searches_until_visible(client: SplunkRestClient, *, attempts: int = 6, 
         last_results = client.run_searches()
         verification = verify_splunk_results(last_results)
         if verification["matches_expected_lifecycle_shape"]:
+            return last_results
+        if attempt < attempts:
+            time.sleep(delay_seconds)
+    return last_results
+
+
+def _run_rollback_searches_until_visible(
+    client: SplunkRestClient,
+    service: str,
+    deployment_time: str,
+    window_minutes: int,
+    *,
+    attempts: int = 6,
+    delay_seconds: int = 5,
+) -> list[dict]:
+    last_results: list[dict] = []
+    for attempt in range(1, attempts + 1):
+        last_results = client.run_searches(rollback_query_plan(service, deployment_time, window_minutes))
+        verification = verify_rollback_splunk_results(last_results)
+        if verification["all_required_queries_executed"]:
             return last_results
         if attempt < attempts:
             time.sleep(delay_seconds)

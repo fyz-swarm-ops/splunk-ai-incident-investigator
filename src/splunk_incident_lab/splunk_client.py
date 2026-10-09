@@ -113,6 +113,21 @@ class SplunkRestClient:
             "index": "main",
         }
 
+    def ingest_json_records(self, records_path: Path, *, source: str) -> dict:
+        records = [
+            json.loads(line)
+            for line in records_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        for record in records:
+            self.ingest_json_record(record, source=source)
+        return {
+            "event_count": len(records),
+            "source": source,
+            "sourcetype": "_json",
+            "index": "main",
+        }
+
     def ingest_event(self, event: Event) -> None:
         params = {
             "index": "main",
@@ -122,6 +137,17 @@ class SplunkRestClient:
             "output_mode": "json",
         }
         body = json.dumps(asdict(event), sort_keys=True).encode("utf-8")
+        self._json_request("POST", "/services/receivers/simple", params, body)
+
+    def ingest_json_record(self, record: dict, *, source: str) -> None:
+        params = {
+            "index": "main",
+            "source": source,
+            "sourcetype": "_json",
+            "host": "local-lab",
+            "output_mode": "json",
+        }
+        body = json.dumps(record, sort_keys=True).encode("utf-8")
         self._json_request("POST", "/services/receivers/simple", params, body)
 
     def run_searches(self, queries: list[SplunkQuery] | None = None) -> list[dict]:

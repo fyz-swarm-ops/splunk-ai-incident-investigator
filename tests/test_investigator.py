@@ -12,6 +12,16 @@ import zipfile
 from splunk_incident_lab.evidence import EvidenceValidationError, validate_evidence_package, write_reports
 from splunk_incident_lab.investigator import build_investigation, investigate_local, verify_splunk_results
 from splunk_incident_lab.llm import LlmConfig, analyze_with_llm
+from splunk_incident_lab.rollback import (
+    DEPLOYMENT_TIME,
+    ROLLBACK_CASES,
+    SERVICE,
+    build_rollback_investigation,
+    local_rollback_results,
+    query_plan_as_dicts as rollback_query_plan_as_dicts,
+    rollback_events,
+    write_rollback_events,
+)
 from splunk_incident_lab.scenario import write_events
 from splunk_incident_lab.splunk_client import (
     SplunkAuthenticationError,
@@ -267,6 +277,133 @@ def test_evidence_ui_serves_queries_findings_timeline_and_evidence(tmp_path):
             proc.wait(timeout=5)
 
 
+def test_rollback_advisory_ranks_db_pool_exhaustion_without_answer_labels():
+    records = [event.__dict__ for event in rollback_events("db-pool-exhaustion")]
+    investigation = _rollback_investigation(records)
+
+    workflow = investigation["advisory_workflow"]
+    top = workflow["ranked_hypotheses"][0]
+    assert top["id"] == "deployment-db-pool-exhaustion"
+    assert top["support_level"] == "strong"
+    assert "Deployment timing starts the investigation" in workflow["decision_boundary"]
+    assert workflow["follow_up_recovery_assessment"]["causality_boundary"].startswith("Recovery after")
+    assert not _contains_forbidden_answer_label(investigation)
+
+
+def test_rollback_advisory_payment_timeout_is_not_deployment_by_timing_only():
+    records = [event.__dict__ for event in rollback_events("payment-timeout")]
+    investigation = _rollback_investigation(records)
+
+    workflow = investigation["advisory_workflow"]
+    top = workflow["ranked_hypotheses"][0]
+    assert top["id"] == "coincidental-payment-provider-timeout"
+    assert "Do not prioritize rollback yet" in workflow["advisory_recommendation"]
+    assert top["supporting_evidence_event_ids"]
+
+
+def test_rollback_advisory_inconclusive_surfaces_missing_information():
+    records = [event.__dict__ for event in rollback_events("inconclusive")]
+    investigation = _rollback_investigation(records)
+
+    workflow = investigation["advisory_workflow"]
+    top = workflow["ranked_hypotheses"][0]
+    assert top["id"] == "deployment-regression-unknown"
+    assert "collect missing dependency and database evidence" in workflow["advisory_recommendation"]
+    assert "database pool metrics" in workflow["missing_information"]
+    assert "payment dependency metrics" in workflow["missing_information"]
+
+
+def test_rollback_advisory_healthy_negative_control_does_not_recommend_rollback():
+    records = [event.__dict__ for event in rollback_events("healthy")]
+    investigation = _rollback_investigation(records)
+
+    workflow = investigation["advisory_workflow"]
+    assert workflow["baseline_incident_comparison"]["incident"]["degraded_against_baseline"] is False
+    assert workflow["follow_up_recovery_assessment"]["recovered"] is False
+    assert workflow["follow_up_recovery_assessment"]["intervention_observed"] is False
+    assert "no rollback or intervention was observed" in workflow["follow_up_recovery_assessment"]["assessment"]
+    assert "Do not roll back" in workflow["advisory_recommendation"]
+    assert workflow["ranked_hypotheses"][0]["id"] == "healthy-negative-control"
+    assert workflow["ranked_hypotheses"][0]["support_level"] == "strong"
+    assert all(item.get("intervention") is None for item in records)
+    assert all(
+        item["deployment_version"] == "checkout-api@2026.10.09-1"
+        for item in records
+        if item["signal_type"] == "request" and item["timestamp"] >= DEPLOYMENT_TIME
+    )
+
+
+def test_rollback_demo_generates_all_required_cases(tmp_path):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "splunk_incident_lab.cli",
+            "demo-rollback",
+            "--output",
+            str(tmp_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "wrote rollback advisory demo" in result.stdout
+    summary = json.loads((tmp_path / "rollback-demo-summary.json").read_text(encoding="utf-8"))
+    assert {item["case"] for item in summary["cases"]} == set(ROLLBACK_CASES)
+    for case in ROLLBACK_CASES:
+        assert validate_evidence_package(tmp_path / case)["valid"] is True
+
+
+def test_rollback_ui_serves_advisory_fields(tmp_path):
+    events_path = tmp_path / "raw" / "rollback-events.jsonl"
+    write_rollback_events("db-pool-exhaustion", events_path)
+    records = [event.__dict__ for event in rollback_events("db-pool-exhaustion")]
+    write_reports(tmp_path, _rollback_investigation(records))
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "splunk_incident_lab.cli",
+            "serve",
+            "--evidence",
+            str(tmp_path),
+            "--port",
+            "0",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        line = proc.stdout.readline().strip()
+        base_url = line.removeprefix("serving evidence UI at ")
+        for path, marker in [
+            ("/", "Rollback Advisory Investigator"),
+            ("/api/findings", "finding-deployment-db-pool-exhaustion"),
+            ("/api/evidence", "ranked_hypotheses"),
+            ("/api/timeline", "database connection checkout waited"),
+        ]:
+            with request.urlopen(f"{base_url}{path}", timeout=5) as response:
+                assert response.status == 200
+                assert marker in response.read().decode("utf-8")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
+def test_rollback_query_plan_is_evidence_only():
+    serialized = json.dumps(rollback_query_plan_as_dicts(SERVICE, DEPLOYMENT_TIME, 14))
+    assert "root_cause_ground_truth" not in serialized
+    assert "db_pool" in serialized
+    assert "payment_timeout" in serialized
+
+
 def _start_server(handler: type[BaseHTTPRequestHandler]) -> HTTPServer:
     server = HTTPServer(("127.0.0.1", 0), handler)
     thread = Thread(target=server.serve_forever, daemon=True)
@@ -345,3 +482,19 @@ class _LlmSuccessHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         pass
+
+
+def _rollback_investigation(records: list[dict]) -> dict:
+    return build_rollback_investigation(
+        records,
+        service=SERVICE,
+        deployment_time=DEPLOYMENT_TIME,
+        window_minutes=14,
+        mode="local",
+        splunk_rest_results=local_rollback_results(records, SERVICE, DEPLOYMENT_TIME, 14),
+    )
+
+
+def _contains_forbidden_answer_label(payload: dict) -> bool:
+    serialized = json.dumps(payload)
+    return "root_cause_ground_truth" in serialized or "expected_answer" in serialized

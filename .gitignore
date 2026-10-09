@@ -7,3 +7,4 @@ __pycache__/
 evidence/latest/
 !evidence/latest/.gitkeep
 evidence/latest-*/
+evidence/rollback-demo/

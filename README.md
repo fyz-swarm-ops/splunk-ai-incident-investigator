@@ -14,6 +14,7 @@ This first slice provides:
 - Optional OpenAI-compatible LLM analysis path fed by retrieved evidence; deterministic template mode remains the labeled fallback.
 - Evidence export with raw events, executed SPL results, timeline, findings, SHA-256 manifest, JSON, Markdown report, HTML report, and ZIP package.
 - Browser evidence UI served from the generated investigation package for queries, findings, timeline, and evidence navigation.
+- A read-only rollback advisory workflow for the operator question: "Should we roll back this deployment?"
 - Kubernetes manifests for the synthetic telemetry generator.
 - Unit tests for the investigation engine, evidence package, Splunk REST success/auth/empty/malformed response behavior, and configurable LLM provider calls.
 - LinkedIn and Upwork publication drafts in `docs/publication-drafts.md`.
@@ -64,6 +65,50 @@ make lab-validate
 
 Validation checks the manifest SHA-256 hashes and the required lifecycle gates: healthy baseline, controlled fault/root-cause verification, remediation/recovery verification, and, in `SPLUNK_MODE=rest`, executed Splunk results matching the expected lifecycle shape.
 
+## Rollback advisory workflow
+
+The rollback advisory extension is read-only. An engineer supplies a service, deployment time, and investigation window; the tool compares pre-deployment and post-deployment health, ranks competing hypotheses, links each hypothesis to evidence/query IDs, lists missing information, and recommends the next checks before any rollback decision.
+
+Deployment timing is treated as a starting hypothesis, not proof of causation. The rollback workflow does not feed hidden scenario answers such as `root_cause_ground_truth` into the investigator.
+
+Generate the complete local demonstration:
+
+```bash
+make rollback-demo
+```
+
+This writes four reviewable evidence packages under `evidence/rollback-demo/`:
+
+- `db-pool-exhaustion`: deployment-associated database connection-pool exhaustion.
+- `payment-timeout`: payment-provider timeout coinciding with the deployment, with independent dependency evidence stronger than deployment timing.
+- `inconclusive`: degraded checkout health with missing database/payment dependency signals.
+- `healthy`: healthy negative control.
+
+Each case includes:
+
+- baseline/incident comparison;
+- ranked hypotheses;
+- supporting and contradictory evidence IDs;
+- missing information;
+- executed SPL text and query result records;
+- follow-up recovery assessment that explicitly does not treat recovery alone as proof of cause;
+- `investigation.json`, `report.md`, `report.html`, `manifest.json`, and `splunk-incident-evidence.zip`.
+
+Run one advisory investigation directly:
+
+```bash
+splunk-incident-lab seed-rollback --case db-pool-exhaustion --output evidence/rollback/raw/rollback-events.jsonl
+splunk-incident-lab investigate-rollback \
+  --events evidence/rollback/raw/rollback-events.jsonl \
+  --output evidence/rollback \
+  --service checkout-api \
+  --deployment-time 2026-10-09T15:00:00Z \
+  --window-minutes 14
+splunk-incident-lab validate --evidence evidence/rollback
+```
+
+With Splunk running, add `--mode rest` to `investigate-rollback`. The command verifies Splunk readiness/auth, ingests the rollback signals into real Splunk as `source="splunk-incident-lab:rollback"`, executes the rollback SPL plan through REST, and exports returned results. Do not claim Splunk-backed rollback advisory evidence unless this REST mode has completed for the relevant case.
+
 ## Splunk lab gate
 
 ```bash
@@ -103,7 +148,7 @@ make lab-investigate SPLUNK_MODE=rest
 
 When those values are present, retrieved evidence is supplied to the model and `llm_analysis.mode` is written as `llm-provider`. Do not claim LLM-assisted investigation unless this path has been run with a real provider response captured in the exported evidence.
 
-The evidence context distinguishes synthetic telemetry that was ingested into real Splunk and retrieved through executed SPL from local-only deterministic file analysis. Synthetic telemetry validates the integration path and investigation workflow; it does not prove a real third-party provider outage.
+The evidence context distinguishes synthetic telemetry that was ingested into real Splunk and retrieved through executed SPL from local-only deterministic file analysis. Synthetic telemetry validates the integration path and investigation workflow; it does not prove a real third-party provider outage or a real production deployment regression.
 
 The complete demonstration lifecycle is: healthy baseline -> controlled payment-provider timeout injection -> observable checkout latency/error failure -> Splunk-backed investigation -> evidence-backed root cause verification -> lab remediation by ending the injected timeout phase -> objective recovery verification -> evidence export -> teardown -> clean reproduction.
 

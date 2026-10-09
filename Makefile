@@ -6,7 +6,7 @@ SPLUNK_WEB_PORT ?= 8000
 SPLUNK_HEC_PORT ?= 8088
 SPLUNKD_PORT ?= 8089
 
-.PHONY: test lab-up lab-down lab-seed lab-investigate lab-export lab-validate lab-reproduce lab-deploy lab-kind-up lab-kind-down lab-k8s-secret lab-run-k8s lab-k8s-logs lab-verify-k8s
+.PHONY: test lab-up lab-down lab-seed lab-investigate lab-export lab-validate lab-reproduce rollback-demo lab-deploy lab-kind-up lab-kind-down lab-k8s-secret lab-run-k8s lab-k8s-logs lab-verify-k8s
 
 test:
 	$(PYTHON) -m pytest tests
@@ -34,6 +34,9 @@ lab-validate:
 	$(PYTHON) -m splunk_incident_lab.cli validate --evidence $(EVIDENCE_DIR)
 
 lab-reproduce: lab-seed lab-investigate lab-export lab-validate
+
+rollback-demo:
+	$(PYTHON) -m splunk_incident_lab.cli demo-rollback --output evidence/rollback-demo
 
 lab-deploy:
 	kubectl apply -f k8s/namespace.yaml
