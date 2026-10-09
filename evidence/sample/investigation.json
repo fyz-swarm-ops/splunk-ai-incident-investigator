@@ -8,59 +8,140 @@
       ],
       "evidence_query_ids": [
         "spl-latency-spike",
-        "spl-error-rate"
+        "spl-error-rate",
+        "spl-lifecycle-phase-health",
+        "spl-root-cause-ground-truth"
       ],
       "hypothesis": "The incident is consistent with a downstream payment provider timeout affecting checkout latency and one failed request.",
       "id": "finding-checkout-provider-timeout",
       "observation": "3 checkout events exceeded 750 ms; 1 returned HTTP 5xx.",
       "severity": "high",
-      "uncertainty": "Synthetic ground truth indicates provider timeout; live Splunk confirmation still depends on running the Docker lab and ingesting these events."
+      "uncertainty": "Telemetry is synthetic, but it was ingested into real Splunk and retrieved through executed SPL over the Splunk REST API. The payment-provider-timeout cause remains scenario ground truth, not an independently proven external-provider outage."
     }
   ],
+  "lifecycle": {
+    "controlled_fault_injection": {
+      "error_event_count": 1,
+      "event_count": 6,
+      "fault": "payment-provider-timeout",
+      "ground_truth_event_ids": [
+        "event-006",
+        "event-007",
+        "event-008",
+        "event-009",
+        "event-010",
+        "event-011"
+      ],
+      "observable_symptoms": [
+        "checkout latency above 750 ms",
+        "HTTP 500 during checkout",
+        "payment provider timeout log messages"
+      ],
+      "slow_event_count": 3
+    },
+    "healthy_baseline": {
+      "error_count": 0,
+      "event_count": 6,
+      "median_latency_ms": 101.0,
+      "verified": true
+    },
+    "recovery_verification": {
+      "acceptance": "no recovered checkout event exceeds 750 ms and no recovered checkout event returns 5xx",
+      "error_event_count": 0,
+      "event_count": 6,
+      "median_latency_ms": 101.0,
+      "slow_event_count": 0,
+      "verified": true
+    },
+    "remediation": {
+      "action": "restore payment-provider behavior in the disposable lab by ending the injected timeout phase",
+      "applied_in_scenario": true,
+      "event_flag": "remediation_applied=true"
+    },
+    "root_cause_verification": {
+      "evidence_event_ids": [
+        "event-006",
+        "event-007",
+        "event-008",
+        "event-009",
+        "event-010",
+        "event-011"
+      ],
+      "evidence_query_ids": [
+        "spl-latency-spike",
+        "spl-error-rate",
+        "spl-root-cause-ground-truth"
+      ],
+      "ground_truth_scope": "controlled synthetic lab fault; not a claim about a real external outage",
+      "root_cause": "payment-provider-timeout",
+      "verified": true
+    },
+    "splunk_backed_verification": {
+      "actual_error_row_count": 1,
+      "actual_ground_truth_event_count": 6,
+      "actual_slow_event_count": 3,
+      "baseline_healthy": true,
+      "expected_error_event_count": 1,
+      "expected_ground_truth_event_count": 6,
+      "expected_slow_event_count": 3,
+      "matches_expected_incident_shape": true,
+      "matches_expected_lifecycle_shape": true,
+      "phase_health": {
+        "healthy-baseline": {
+          "avg_latency_ms": 102.83333333333333,
+          "errors": 0,
+          "events": 6,
+          "max_latency_ms": 123
+        },
+        "injected-failure": {
+          "avg_latency_ms": 577.6666666666666,
+          "errors": 1,
+          "events": 6,
+          "max_latency_ms": 1180
+        },
+        "recovered": {
+          "avg_latency_ms": 102.83333333333333,
+          "errors": 0,
+          "events": 6,
+          "max_latency_ms": 123
+        }
+      },
+      "recovery_healthy": true
+    }
+  },
   "llm_analysis": {
     "analysis": {
       "caveats": [
-        "Some evidence appears to be from a synthetic lab. The finding explicitly notes that live Splunk confirmation depends on running the Docker lab and ingesting these events. Treat the current result as potentially synthetic until validated in production logs.",
-        "Sample size is small: 3 slow events out of 12 total events and 1 error. This limits statistical certainty about a broader service-wide outage.",
-        "Two of the slow events returned HTTP 200 despite the 'payment provider timeout during checkout' message; this may indicate local handling/fallback logic that masks provider errors or that the message text is logged regardless of final status. Full trace/span inspection is required to interpret these cases.",
-        "Do not assume additional systems or facts not present in the evidence (e.g., other downstream services, SLA breaches, user impact beyond these events) without further data."
+        "Telemetry is synthetic: the root cause ('payment-provider-timeout') is a controlled scenario ground truth and not an independent proof of a real external provider outage.",
+        "Sample size per phase is small (6 events per scenario_phase); while Splunk results match expectations, statistical confidence is limited by the small number of events.",
+        "Not all slow requests returned errors: two of the three slow traces (trace-0006 and trace-0008) had status 200 despite high latency, so high latency did not always correlate with a 5xx in this scenario.",
+        "Do not extrapolate this lab result to production without further validation and consideration of production traffic patterns, SLAs, and error handling behavior."
       ],
-      "confidence": 0.7,
-      "likely_cause": "Timeouts contacting the payment provider during checkout (as indicated by the event messages), producing three high-latency checkout requests and one 5xx response.",
+      "confidence": {
+        "level": "high",
+        "rationale": "Splunk query results match the expected counts and trace-level evidence (3 slow traces, 1 error, 6 ground-truth events during injected-failure) and the scenario's root_cause_verification flag is true.",
+        "score": 0.92
+      },
+      "likely_cause": "The injected 'payment-provider-timeout' fault in the controlled lab caused checkout requests to experience significant latency (three traces >750 ms) and produced one HTTP 500; Splunk-backed verification matches the expected failure shape for the injected-fault scenario.",
       "recommended_actions": [
-        {
-          "action": "Correlate full distributed traces for trace-0006, trace-0007, and trace-0008.",
-          "rationale": "Confirm where time was spent (client vs. payment-provider network vs. provider processing) and verify that the payment-provider call is the span causing the latency/failure."
-        },
-        {
-          "action": "Check the payment provider\u2019s status and logs for the incident timeframe and contact the provider if they report degraded service.",
-          "rationale": "The event messages explicitly reference a payment provider timeout; provider-side confirmation can validate the root cause."
-        },
-        {
-          "action": "Re-run and expand the provided Splunk queries (spl-latency-spike and spl-error-rate) across a wider time window and ensure the lab/ingest pipeline is running.",
-          "rationale": "Current results appear to come from a synthetic lab; expanding the window and confirming ingestion will reveal whether the issue is transient or recurring and will validate the findings in live data."
-        },
-        {
-          "action": "Inspect checkout-api\u2019s timeout and retry logic for payment-provider calls and review recent deployments/changes to that code or config.",
-          "rationale": "If provider timeouts are a cause, ensure the client\u2019s timeouts, retries, and circuit-breaker behavior are appropriate to avoid cascading failures and to produce correct status codes/observability."
-        },
-        {
-          "action": "Create/adjust monitoring and alerts to detect payment-provider latency and error increases (e.g., percentiles, count of >750 ms, 5xx rate) and tie alerts to the relevant trace IDs.",
-          "rationale": "Faster detection of recurrence will reduce user impact and provide traces immediately for investigation."
-        },
-        {
-          "action": "If provider outage is confirmed, implement mitigation steps (provider failover if available, user-facing messaging and graceful retries) according to the product\u2019s operational playbook.",
-          "rationale": "Mitigations reduce user impact while the provider issue is resolved."
-        }
+        "Confirm remediation completeness: re-run the provided Splunk queries (spl-latency-spike, spl-error-rate, spl-lifecycle-phase-health, spl-root-cause-ground-truth) to verify no remaining injected faults and that recovered phase metrics remain at baseline.",
+        "Record this scenario and results in a short post-run report (include the Splunk query outputs and timeline) to capture lessons learned from the injection and remediation steps.",
+        "If this test is intended to model a real production risk, assess production mitigations (examples to consider: explicit payment-provider request timeouts, retries with backoff, and alerting on latency spikes and elevated 5xx rates). Document any decisions before applying to production.",
+        "Tune monitoring and alerting thresholds based on these observations (e.g., alert on checkout latency >750 ms and on status>=500) and ensure alerts include trace_id for rapid triage.",
+        "If repeat injections are planned, include a broader sample of traffic and longer windows to validate behavior under varied load and to detect intermittent failures that may not appear in a small sample."
       ],
       "summary": {
-        "hypothesis": "A downstream payment provider timeout occurred during the incident window and caused elevated checkout latency for three requests and one HTTP 5xx failure.",
+        "context": "All telemetry was ingested into a real Splunk instance and retrieved via the listed SPL queries over the Splunk REST API. Root-cause verification in the scenario is marked as 'verified'.",
+        "hypotheses": [
+          "The observable incident behavior (latency spikes and one 5xx) is caused by the injected 'payment-provider-timeout' fault active during the injected-failure phase.",
+          "Because the telemetry is synthetic and the fault is a scenario ground truth, this does not assert a real external provider outage in production \u2014 only that the lab injection produced the observed symptoms."
+        ],
         "observations": [
-          "Splunk query 'spl-latency-spike' returned 3 checkout events with latency_ms 1030, 1180, and 920 (trace_ids: trace-0008, trace-0007, trace-0006). All three events include the message 'payment provider timeout during checkout'.",
-          "Of the three slow events, two have status 200 (trace-0008, trace-0006) and one has status 500 (trace-0007).",
-          "Metrics show baseline median latency 101 ms, max_latency_ms 1180 ms, event_count 12, slow_event_count 3, and error_event_count 1.",
-          "The finding supplied with the evidence states the same hypothesis: 'The incident is consistent with a downstream payment provider timeout affecting checkout latency and one failed request.'",
-          "The evidence source includes a note that the synthetic ground truth indicates a provider timeout and that live Splunk confirmation depends on running the Docker lab and ingesting these events."
+          "This was a controlled, synthetic fault-injection scenario where a 'payment-provider-timeout' fault was injected during the 'injected-failure' phase.",
+          "Splunk queries (spl-latency-spike, spl-error-rate, spl-lifecycle-phase-health, spl-root-cause-ground-truth) returned results consistent with the injected fault and the expected incident shape.",
+          "During the injected-failure phase there are 6 checkout events; 3 traces exceeded 750 ms latency (trace-0006: 920 ms, trace-0008: 1030 ms, trace-0007: 1180 ms) and 1 of those returned HTTP 500 (trace-0007).",
+          "Baseline and recovered phases each show 6 events with median/avg latency \u2248101 ms and 0 errors; injected-failure phase shows avg latency \u2248577.7 ms, max 1180 ms, and 1 error.",
+          "Remediation for the scenario was applied (remediation_applied=true) and recovery verification shows healthy baseline metrics restored."
         ]
       }
     },
@@ -68,13 +149,14 @@
     "model": "gpt-5-mini",
     "provider_endpoint": "https://api.openai.com/v1",
     "safety": "Retrieved evidence was supplied to the model; unsupported claims remain disallowed by prompt contract.",
-    "summary": "{\"hypothesis\": \"A downstream payment provider timeout occurred during the incident window and caused elevated checkout latency for three requests and one HTTP 5xx failure.\", \"observations\": [\"Splunk query 'spl-latency-spike' returned 3 checkout events with latency_ms 1030, 1180, and 920 (trace_ids: trace-0008, trace-0007, trace-0006). All three events include the message 'payment provider timeout during checkout'.\", \"Of the three slow events, two have status 200 (trace-0008, trace-0006) and one has status 500 (trace-0007).\", \"Metrics show baseline median latency 101 ms, max_latency_ms 1180 ms, event_count 12, slow_event_count 3, and error_event_count 1.\", \"The finding supplied with the evidence states the same hypothesis: 'The incident is consistent with a downstream payment provider timeout affecting checkout latency and one failed request.'\", \"The evidence source includes a note that the synthetic ground truth indicates a provider timeout and that live Splunk confirmation depends on running the Docker lab and ingesting these events.\"]}"
+    "summary": "{\"context\": \"All telemetry was ingested into a real Splunk instance and retrieved via the listed SPL queries over the Splunk REST API. Root-cause verification in the scenario is marked as 'verified'.\", \"hypotheses\": [\"The observable incident behavior (latency spikes and one 5xx) is caused by the injected 'payment-provider-timeout' fault active during the injected-failure phase.\", \"Because the telemetry is synthetic and the fault is a scenario ground truth, this does not assert a real external provider outage in production \\u2014 only that the lab injection produced the observed symptoms.\"], \"observations\": [\"This was a controlled, synthetic fault-injection scenario where a 'payment-provider-timeout' fault was injected during the 'injected-failure' phase.\", \"Splunk queries (spl-latency-spike, spl-error-rate, spl-lifecycle-phase-health, spl-root-cause-ground-truth) returned results consistent with the injected fault and the expected incident shape.\", \"During the injected-failure phase there are 6 checkout events; 3 traces exceeded 750 ms latency (trace-0006: 920 ms, trace-0008: 1030 ms, trace-0007: 1180 ms) and 1 of those returned HTTP 500 (trace-0007).\", \"Baseline and recovered phases each show 6 events with median/avg latency \\u2248101 ms and 0 errors; injected-failure phase shows avg latency \\u2248577.7 ms, max 1180 ms, and 1 error.\", \"Remediation for the scenario was applied (remediation_applied=true) and recovery verification shows healthy baseline metrics restored.\"]}"
   },
   "metrics": {
-    "baseline_latency_ms_median": 101,
+    "baseline_latency_ms_median": 101.0,
     "error_event_count": 1,
-    "event_count": 12,
+    "event_count": 18,
     "max_latency_ms": 1180,
+    "recovery_latency_ms_median": 101.0,
     "slow_event_count": 3
   },
   "mode": "rest",
@@ -82,17 +164,27 @@
     {
       "id": "spl-latency-spike",
       "purpose": "Find checkout latency spikes above 750 ms.",
-      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" latency_ms>750 | table _time trace_id status latency_ms message"
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" latency_ms>750 | dedup trace_id | table _time trace_id status latency_ms message"
     },
     {
       "id": "spl-error-rate",
       "purpose": "Find checkout HTTP errors during the incident window.",
       "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" status>=500 | stats count by status message"
+    },
+    {
+      "id": "spl-lifecycle-phase-health",
+      "purpose": "Compare baseline, injected-failure, and recovered checkout health.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" | stats dc(trace_id) as events avg(latency_ms) as avg_latency_ms max(latency_ms) as max_latency_ms dc(eval(if(status>=500, trace_id, null()))) as errors by scenario_phase"
+    },
+    {
+      "id": "spl-root-cause-ground-truth",
+      "purpose": "Verify the controlled fault ground truth is only present during injected failure.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" root_cause_ground_truth=\"payment-provider-timeout\" | dedup trace_id | table _time trace_id scenario_phase fault_injected status latency_ms message root_cause_ground_truth"
     }
   ],
   "schema_version": "splunk-incident-lab.v1",
   "splunk_ingest": {
-    "event_count": 12,
+    "event_count": 18,
     "index": "main",
     "source": "splunk-incident-lab:checkout",
     "sourcetype": "_json"
@@ -135,7 +227,7 @@
             "creation_time": 1571036400,
             "disabled_features": [],
             "eai:acl": null,
-            "expiration_time": 1796678129,
+            "expiration_time": 1796693126,
             "features": [
               "Acceleration",
               "AdvancedSearchCommands",
@@ -183,7 +275,7 @@
             "notes": "",
             "quota": 524288000,
             "relative_expiration_interval": 5184000,
-            "relative_expiration_start": 1791494129,
+            "relative_expiration_start": 1791509126,
             "sourcetypes": [],
             "stack_id": "download-trial",
             "status": "VALID",
@@ -388,7 +480,7 @@
         "perPage": 30,
         "total": 3
       },
-      "updated": "2026-10-08T21:15:38+00:00"
+      "updated": "2026-10-09T01:25:36+00:00"
     },
     "rest_api": "https://localhost:8089",
     "server_info": {
@@ -430,28 +522,28 @@
             "eai:acl": null,
             "federated_search_enabled": true,
             "fips_mode": false,
-            "guid": "3A47A974-899F-435B-AA19-E33861609A8F",
+            "guid": "6C147B97-4C2D-42A7-9F88-437A3119AEBA",
             "health_info": "green",
-            "health_version": 3684657794,
-            "host": "a28e508b60e5",
-            "host_fqdn": "a28e508b60e5",
-            "host_resolved": "a28e508b60e5",
+            "health_version": 1176408701,
+            "host": "37c590df624d",
+            "host_fqdn": "37c590df624d",
+            "host_resolved": "37c590df624d",
             "isConverged": false,
             "isForwarding": false,
             "isFree": false,
             "isTrial": true,
-            "kvStoreStatus": "ready",
+            "kvStoreStatus": "starting",
             "licenseKeys": [
               "5C52DA5145AD67B8188604C49962D12F2C3B2CF1B82A6878E46F68CA2812807B"
             ],
-            "licenseSignature": "cc96e14ca7e93e5d0f4fed6d4b6cde02",
+            "licenseSignature": "1a0a6d7eb12157f02845f5af46098d40",
             "licenseState": "OK",
             "license_labels": [
               "Splunk Enterprise   Splunk Analytics for Hadoop Download Trial"
             ],
-            "manager_guid": "3A47A974-899F-435B-AA19-E33861609A8F",
+            "manager_guid": "6C147B97-4C2D-42A7-9F88-437A3119AEBA",
             "manager_uri": "self",
-            "master_guid": "3A47A974-899F-435B-AA19-E33861609A8F",
+            "master_guid": "6C147B97-4C2D-42A7-9F88-437A3119AEBA",
             "master_uri": "self",
             "max_users": 4294967295,
             "mode": "normal",
@@ -464,16 +556,15 @@
             "physicalMemoryMB": 7837,
             "product_type": "enterprise",
             "rtsearch_enabled": true,
-            "serverName": "a28e508b60e5",
+            "serverName": "37c590df624d",
             "server_roles": [
               "indexer",
               "license_master",
-              "license_manager",
-              "kv_store"
+              "license_manager"
             ],
             "shutting_down": "0",
-            "startup_time": 1791494099,
-            "staticAssetId": "E91841BC6C780AEEA0CB9B3C0F626DFA91BC808F3F2B8CEEA4530D6A12BAAAC4",
+            "startup_time": 1791509105,
+            "staticAssetId": "C49B2B94695DD9D82F0A22F4BA358BA65BAD2875F309C48DC8C578DB03970B31",
             "version": "10.0.11",
             "versionControlEnabled": true
           },
@@ -498,31 +589,31 @@
         "perPage": 30,
         "total": 1
       },
-      "updated": "2026-10-08T21:15:38+00:00"
+      "updated": "2026-10-09T01:25:36+00:00"
     }
   },
   "splunk_rest_results": [
     {
       "purpose": "Find checkout latency spikes above 750 ms.",
-      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" latency_ms>750 | table _time trace_id status latency_ms message",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" latency_ms>750 | dedup trace_id | table _time trace_id status latency_ms message",
       "query_id": "spl-latency-spike",
       "rows": [
         {
-          "_time": "2026-10-08T21:15:39.000+00:00",
+          "_time": "2026-10-09T01:25:36.000+00:00",
           "latency_ms": "1030",
           "message": "payment provider timeout during checkout",
           "status": "200",
           "trace_id": "trace-0008"
         },
         {
-          "_time": "2026-10-08T21:15:39.000+00:00",
+          "_time": "2026-10-09T01:25:36.000+00:00",
           "latency_ms": "1180",
           "message": "payment provider timeout during checkout",
           "status": "500",
           "trace_id": "trace-0007"
         },
         {
-          "_time": "2026-10-08T21:15:39.000+00:00",
+          "_time": "2026-10-09T01:25:36.000+00:00",
           "latency_ms": "920",
           "message": "payment provider timeout during checkout",
           "status": "200",
@@ -541,21 +632,145 @@
           "status": "500"
         }
       ]
+    },
+    {
+      "purpose": "Compare baseline, injected-failure, and recovered checkout health.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" | stats dc(trace_id) as events avg(latency_ms) as avg_latency_ms max(latency_ms) as max_latency_ms dc(eval(if(status>=500, trace_id, null()))) as errors by scenario_phase",
+      "query_id": "spl-lifecycle-phase-health",
+      "rows": [
+        {
+          "avg_latency_ms": "102.83333333333333",
+          "errors": "0",
+          "events": "6",
+          "max_latency_ms": "123",
+          "scenario_phase": "healthy-baseline"
+        },
+        {
+          "avg_latency_ms": "577.6666666666666",
+          "errors": "1",
+          "events": "6",
+          "max_latency_ms": "1180",
+          "scenario_phase": "injected-failure"
+        },
+        {
+          "avg_latency_ms": "102.83333333333333",
+          "errors": "0",
+          "events": "6",
+          "max_latency_ms": "123",
+          "scenario_phase": "recovered"
+        }
+      ]
+    },
+    {
+      "purpose": "Verify the controlled fault ground truth is only present during injected failure.",
+      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search service=checkout-api endpoint=\"/checkout\" root_cause_ground_truth=\"payment-provider-timeout\" | dedup trace_id | table _time trace_id scenario_phase fault_injected status latency_ms message root_cause_ground_truth",
+      "query_id": "spl-root-cause-ground-truth",
+      "rows": [
+        {
+          "_time": "2026-10-09T01:25:36.000+00:00",
+          "fault_injected": "true",
+          "latency_ms": "123",
+          "message": "payment provider timeout fault active during checkout",
+          "root_cause_ground_truth": "payment-provider-timeout",
+          "scenario_phase": "injected-failure",
+          "status": "200",
+          "trace_id": "trace-0011"
+        },
+        {
+          "_time": "2026-10-09T01:25:36.000+00:00",
+          "fault_injected": "true",
+          "latency_ms": "112",
+          "message": "payment provider timeout fault active during checkout",
+          "root_cause_ground_truth": "payment-provider-timeout",
+          "scenario_phase": "injected-failure",
+          "status": "200",
+          "trace_id": "trace-0010"
+        },
+        {
+          "_time": "2026-10-09T01:25:36.000+00:00",
+          "fault_injected": "true",
+          "latency_ms": "101",
+          "message": "payment provider timeout fault active during checkout",
+          "root_cause_ground_truth": "payment-provider-timeout",
+          "scenario_phase": "injected-failure",
+          "status": "200",
+          "trace_id": "trace-0009"
+        },
+        {
+          "_time": "2026-10-09T01:25:36.000+00:00",
+          "fault_injected": "true",
+          "latency_ms": "1030",
+          "message": "payment provider timeout during checkout",
+          "root_cause_ground_truth": "payment-provider-timeout",
+          "scenario_phase": "injected-failure",
+          "status": "200",
+          "trace_id": "trace-0008"
+        },
+        {
+          "_time": "2026-10-09T01:25:36.000+00:00",
+          "fault_injected": "true",
+          "latency_ms": "1180",
+          "message": "payment provider timeout during checkout",
+          "root_cause_ground_truth": "payment-provider-timeout",
+          "scenario_phase": "injected-failure",
+          "status": "500",
+          "trace_id": "trace-0007"
+        },
+        {
+          "_time": "2026-10-09T01:25:36.000+00:00",
+          "fault_injected": "true",
+          "latency_ms": "920",
+          "message": "payment provider timeout during checkout",
+          "root_cause_ground_truth": "payment-provider-timeout",
+          "scenario_phase": "injected-failure",
+          "status": "200",
+          "trace_id": "trace-0006"
+        }
+      ]
     }
   ],
   "splunk_result_verification": {
     "actual_error_row_count": 1,
+    "actual_ground_truth_event_count": 6,
     "actual_slow_event_count": 3,
+    "baseline_healthy": true,
     "expected_error_event_count": 1,
+    "expected_ground_truth_event_count": 6,
     "expected_slow_event_count": 3,
-    "matches_expected_incident_shape": true
+    "matches_expected_incident_shape": true,
+    "matches_expected_lifecycle_shape": true,
+    "phase_health": {
+      "healthy-baseline": {
+        "avg_latency_ms": 102.83333333333333,
+        "errors": 0,
+        "events": 6,
+        "max_latency_ms": 123
+      },
+      "injected-failure": {
+        "avg_latency_ms": 577.6666666666666,
+        "errors": 1,
+        "events": 6,
+        "max_latency_ms": 1180
+      },
+      "recovered": {
+        "avg_latency_ms": 102.83333333333333,
+        "errors": 0,
+        "events": 6,
+        "max_latency_ms": 123
+      }
+    },
+    "recovery_healthy": true
   },
   "timeline": [
     {
       "endpoint": "/checkout",
+      "fault_injected": false,
       "id": "event-000",
       "latency_ms": 90,
       "message": "checkout request completed",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "healthy-baseline",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:00:00Z",
@@ -563,9 +778,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": false,
       "id": "event-001",
       "latency_ms": 101,
       "message": "checkout request completed",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "healthy-baseline",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:01:00Z",
@@ -573,9 +792,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": false,
       "id": "event-002",
       "latency_ms": 112,
       "message": "checkout request completed",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "healthy-baseline",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:02:00Z",
@@ -583,9 +806,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": false,
       "id": "event-003",
       "latency_ms": 123,
       "message": "checkout request completed",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "healthy-baseline",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:03:00Z",
@@ -593,9 +820,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": false,
       "id": "event-004",
       "latency_ms": 90,
       "message": "checkout request completed",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "healthy-baseline",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:04:00Z",
@@ -603,9 +834,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": false,
       "id": "event-005",
       "latency_ms": 101,
       "message": "checkout request completed",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "healthy-baseline",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:05:00Z",
@@ -613,9 +848,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": true,
       "id": "event-006",
       "latency_ms": 920,
       "message": "payment provider timeout during checkout",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "payment-provider-timeout",
+      "scenario_phase": "injected-failure",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:06:00Z",
@@ -623,9 +862,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": true,
       "id": "event-007",
       "latency_ms": 1180,
       "message": "payment provider timeout during checkout",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "payment-provider-timeout",
+      "scenario_phase": "injected-failure",
       "service": "checkout-api",
       "status": 500,
       "timestamp": "2026-10-08T14:07:00Z",
@@ -633,9 +876,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": true,
       "id": "event-008",
       "latency_ms": 1030,
       "message": "payment provider timeout during checkout",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "payment-provider-timeout",
+      "scenario_phase": "injected-failure",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:08:00Z",
@@ -643,9 +890,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": true,
       "id": "event-009",
       "latency_ms": 101,
-      "message": "checkout request completed",
+      "message": "payment provider timeout fault active during checkout",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "payment-provider-timeout",
+      "scenario_phase": "injected-failure",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:09:00Z",
@@ -653,9 +904,13 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": true,
       "id": "event-010",
       "latency_ms": 112,
-      "message": "checkout request completed",
+      "message": "payment provider timeout fault active during checkout",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "payment-provider-timeout",
+      "scenario_phase": "injected-failure",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:10:00Z",
@@ -663,13 +918,101 @@
     },
     {
       "endpoint": "/checkout",
+      "fault_injected": true,
       "id": "event-011",
       "latency_ms": 123,
-      "message": "checkout request completed",
+      "message": "payment provider timeout fault active during checkout",
+      "remediation_applied": false,
+      "root_cause_ground_truth": "payment-provider-timeout",
+      "scenario_phase": "injected-failure",
       "service": "checkout-api",
       "status": 200,
       "timestamp": "2026-10-08T14:11:00Z",
       "trace_id": "trace-0011"
+    },
+    {
+      "endpoint": "/checkout",
+      "fault_injected": false,
+      "id": "event-012",
+      "latency_ms": 90,
+      "message": "checkout request completed after payment provider timeout remediation",
+      "remediation_applied": true,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "recovered",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:12:00Z",
+      "trace_id": "trace-0012"
+    },
+    {
+      "endpoint": "/checkout",
+      "fault_injected": false,
+      "id": "event-013",
+      "latency_ms": 101,
+      "message": "checkout request completed after payment provider timeout remediation",
+      "remediation_applied": true,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "recovered",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:13:00Z",
+      "trace_id": "trace-0013"
+    },
+    {
+      "endpoint": "/checkout",
+      "fault_injected": false,
+      "id": "event-014",
+      "latency_ms": 112,
+      "message": "checkout request completed after payment provider timeout remediation",
+      "remediation_applied": true,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "recovered",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:14:00Z",
+      "trace_id": "trace-0014"
+    },
+    {
+      "endpoint": "/checkout",
+      "fault_injected": false,
+      "id": "event-015",
+      "latency_ms": 123,
+      "message": "checkout request completed after payment provider timeout remediation",
+      "remediation_applied": true,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "recovered",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:15:00Z",
+      "trace_id": "trace-0015"
+    },
+    {
+      "endpoint": "/checkout",
+      "fault_injected": false,
+      "id": "event-016",
+      "latency_ms": 90,
+      "message": "checkout request completed after payment provider timeout remediation",
+      "remediation_applied": true,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "recovered",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:16:00Z",
+      "trace_id": "trace-0016"
+    },
+    {
+      "endpoint": "/checkout",
+      "fault_injected": false,
+      "id": "event-017",
+      "latency_ms": 101,
+      "message": "checkout request completed after payment provider timeout remediation",
+      "remediation_applied": true,
+      "root_cause_ground_truth": "none",
+      "scenario_phase": "recovered",
+      "service": "checkout-api",
+      "status": 200,
+      "timestamp": "2026-10-08T14:17:00Z",
+      "trace_id": "trace-0017"
     }
   ]
 }

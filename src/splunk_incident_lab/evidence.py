@@ -8,6 +8,10 @@ from html import escape
 from pathlib import Path
 
 
+class EvidenceValidationError(RuntimeError):
+    pass
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -61,6 +65,54 @@ def build_manifest(evidence_dir: Path) -> dict:
     }
 
 
+def validate_evidence_package(evidence_dir: Path) -> dict:
+    investigation_path = evidence_dir / "investigation.json"
+    manifest_path = evidence_dir / "manifest.json"
+    if not investigation_path.exists():
+        raise EvidenceValidationError(f"missing {investigation_path}")
+    if not manifest_path.exists():
+        raise EvidenceValidationError(f"missing {manifest_path}")
+
+    investigation = json.loads(investigation_path.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _validate_manifest_hashes(evidence_dir, manifest)
+    lifecycle = investigation.get("lifecycle") or {}
+    splunk_verification = investigation.get("splunk_result_verification") or {}
+    errors: list[str] = []
+    if not lifecycle.get("healthy_baseline", {}).get("verified"):
+        errors.append("healthy baseline is not verified")
+    if not lifecycle.get("root_cause_verification", {}).get("verified"):
+        errors.append("root cause is not verified")
+    if not lifecycle.get("recovery_verification", {}).get("verified"):
+        errors.append("recovery is not verified")
+    if investigation.get("mode") == "rest" and not splunk_verification.get("matches_expected_lifecycle_shape"):
+        errors.append("executed Splunk results do not match expected lifecycle shape")
+    if errors:
+        raise EvidenceValidationError("; ".join(errors))
+    return {
+        "valid": True,
+        "mode": investigation.get("mode"),
+        "llm_mode": (investigation.get("llm_analysis") or {}).get("mode"),
+        "manifest_file_count": len(manifest.get("files", [])),
+        "lifecycle_verified": True,
+        "splunk_lifecycle_verified": bool(splunk_verification.get("matches_expected_lifecycle_shape")),
+    }
+
+
+def _validate_manifest_hashes(evidence_dir: Path, manifest: dict) -> None:
+    for item in manifest.get("files", []):
+        relative = item.get("path")
+        expected = item.get("sha256")
+        if not relative or not expected:
+            raise EvidenceValidationError("manifest entry missing path or sha256")
+        path = evidence_dir / relative
+        if not path.exists():
+            raise EvidenceValidationError(f"manifest file missing: {relative}")
+        actual = sha256_file(path)
+        if actual != expected:
+            raise EvidenceValidationError(f"hash mismatch for {relative}")
+
+
 def render_markdown(investigation: dict) -> str:
     findings = "\n".join(
         f"- **{item['severity']}** `{item['id']}`: {item['observation']} Hypothesis: {item['hypothesis']} Uncertainty: {item['uncertainty']}"
@@ -72,9 +124,16 @@ def render_markdown(investigation: dict) -> str:
         f"- `{item['query_id']}` returned {len(item.get('rows', []))} row(s)."
         for item in investigation.get("splunk_rest_results", [])
     ) or "- No Splunk REST result rows are present in this evidence package."
+    lifecycle = json.dumps(investigation.get("lifecycle", {}), indent=2, sort_keys=True)
     return f"""# Splunk Incident Investigation Report
 
 Mode: `{investigation['mode']}`
+
+## Lifecycle Verification
+
+```json
+{lifecycle}
+```
 
 ## Metrics
 
@@ -126,6 +185,7 @@ def render_html(investigation: dict) -> str:
         for item in investigation.get("splunk_rest_results", [])
     ) or "<p>No Splunk REST result rows are present in this evidence package.</p>"
     verification = escape(json.dumps(investigation.get("splunk_result_verification", {}), sort_keys=True))
+    lifecycle = escape(json.dumps(investigation.get("lifecycle", {}), indent=2, sort_keys=True))
     llm = investigation["llm_analysis"]
     return f"""<!doctype html>
 <html lang="en">
@@ -146,6 +206,8 @@ pre {{ overflow: auto; padding: .75rem; }}
 <h1>Splunk Incident Investigation</h1>
 <p>Mode: <code>{investigation['mode']}</code></p>
 <p>LLM: <code>{escape(llm['mode'])}</code></p>
+<h2>Lifecycle Verification</h2>
+<pre>{lifecycle}</pre>
 <h2>Executed SPL Queries</h2>
 <table><tr><th>ID</th><th>Purpose</th><th>SPL</th></tr>{queries}</table>
 <h2>Findings</h2>

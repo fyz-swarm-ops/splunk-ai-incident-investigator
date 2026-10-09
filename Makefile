@@ -3,7 +3,7 @@ EVIDENCE_DIR ?= evidence/latest
 SPLUNK_MODE ?= local
 SPLUNK_PASSWORD ?= changeme-please-change
 
-.PHONY: test lab-up lab-down lab-seed lab-investigate lab-export lab-reproduce lab-deploy lab-kind-up lab-kind-down lab-k8s-secret lab-run-k8s lab-k8s-logs lab-verify-k8s
+.PHONY: test lab-up lab-down lab-seed lab-investigate lab-export lab-validate lab-reproduce lab-deploy lab-kind-up lab-kind-down lab-k8s-secret lab-run-k8s lab-k8s-logs lab-verify-k8s
 
 test:
 	$(PYTHON) -m pytest tests
@@ -27,7 +27,10 @@ lab-investigate:
 lab-export:
 	$(PYTHON) -m splunk_incident_lab.cli export --evidence $(EVIDENCE_DIR)
 
-lab-reproduce: lab-seed lab-investigate lab-export
+lab-validate:
+	$(PYTHON) -m splunk_incident_lab.cli validate --evidence $(EVIDENCE_DIR)
+
+lab-reproduce: lab-seed lab-investigate lab-export lab-validate
 
 lab-deploy:
 	kubectl apply -f k8s/namespace.yaml

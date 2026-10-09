@@ -35,6 +35,7 @@ def serve_evidence(evidence_dir: Path, host: str, port: int) -> None:
                     {
                         "mode": investigation["mode"],
                         "llm_analysis": investigation["llm_analysis"],
+                        "lifecycle": investigation.get("lifecycle"),
                         "splunk_rest_results": investigation.get("splunk_rest_results", []),
                         "splunk_result_verification": investigation.get("splunk_result_verification"),
                     }
@@ -104,6 +105,7 @@ def render_ui(investigation: dict) -> str:
         for item in investigation.get("splunk_rest_results", [])
     )
     verification = investigation.get("splunk_result_verification") or {}
+    lifecycle = escape(json.dumps(investigation.get("lifecycle", {}), indent=2, sort_keys=True))
     llm_analysis = investigation["llm_analysis"]
     return f"""<!doctype html>
 <html lang="en">
@@ -140,6 +142,8 @@ pre {{ overflow: auto; padding: 12px; }}
 </div></header>
 <main>
 <section id="queries">
+<h2>Lifecycle Verification</h2>
+<pre>{lifecycle}</pre>
 <h2>Executed SPL Queries</h2>
 <table><tr><th>ID</th><th>Purpose</th><th>SPL</th></tr>{query_rows}</table>
 </section>

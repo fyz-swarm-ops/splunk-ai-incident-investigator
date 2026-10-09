@@ -36,7 +36,7 @@ SPL_QUERY_PLAN = [
         query=(
             'search index=main source="splunk-incident-lab:checkout" '
             '| spath | search service=checkout-api endpoint="/checkout" latency_ms>750 '
-            '| table _time trace_id status latency_ms message'
+            '| dedup trace_id | table _time trace_id status latency_ms message'
         ),
     ),
     SplunkQuery(
@@ -46,6 +46,27 @@ SPL_QUERY_PLAN = [
             'search index=main source="splunk-incident-lab:checkout" '
             '| spath | search service=checkout-api endpoint="/checkout" status>=500 '
             '| stats count by status message'
+        ),
+    ),
+    SplunkQuery(
+        id="spl-lifecycle-phase-health",
+        purpose="Compare baseline, injected-failure, and recovered checkout health.",
+        query=(
+            'search index=main source="splunk-incident-lab:checkout" '
+            '| spath | search service=checkout-api endpoint="/checkout" '
+            '| stats dc(trace_id) as events avg(latency_ms) as avg_latency_ms '
+            'max(latency_ms) as max_latency_ms dc(eval(if(status>=500, trace_id, null()))) as errors '
+            'by scenario_phase'
+        ),
+    ),
+    SplunkQuery(
+        id="spl-root-cause-ground-truth",
+        purpose="Verify the controlled fault ground truth is only present during injected failure.",
+        query=(
+            'search index=main source="splunk-incident-lab:checkout" '
+            '| spath | search service=checkout-api endpoint="/checkout" '
+            'root_cause_ground_truth="payment-provider-timeout" '
+            '| dedup trace_id | table _time trace_id scenario_phase fault_injected status latency_ms message root_cause_ground_truth'
         ),
     ),
 ]

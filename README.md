@@ -56,6 +56,14 @@ Downloadable/generated formats:
 
 PDF export is not implemented in this slice. If a PDF is required for a release channel, generate it from `report.html` as an explicit downstream packaging step and record that step in the release acceptance report.
 
+Validate generated evidence before treating it as accepted:
+
+```bash
+make lab-validate
+```
+
+Validation checks the manifest SHA-256 hashes and the required lifecycle gates: healthy baseline, controlled fault/root-cause verification, remediation/recovery verification, and, in `SPLUNK_MODE=rest`, executed Splunk results matching the expected lifecycle shape.
+
 ## Splunk lab gate
 
 ```bash
@@ -65,6 +73,7 @@ make lab-up
 make lab-seed
 make lab-investigate SPLUNK_MODE=rest
 make lab-export
+make lab-validate
 make lab-down
 ```
 
@@ -86,6 +95,8 @@ make lab-investigate SPLUNK_MODE=rest
 When those values are present, retrieved evidence is supplied to the model and `llm_analysis.mode` is written as `llm-provider`. Do not claim LLM-assisted investigation unless this path has been run with a real provider response captured in the exported evidence.
 
 The evidence context distinguishes synthetic telemetry that was ingested into real Splunk and retrieved through executed SPL from local-only deterministic file analysis. Synthetic telemetry validates the integration path and investigation workflow; it does not prove a real third-party provider outage.
+
+The complete demonstration lifecycle is: healthy baseline -> controlled payment-provider timeout injection -> observable checkout latency/error failure -> Splunk-backed investigation -> evidence-backed root cause verification -> lab remediation by ending the injected timeout phase -> objective recovery verification -> evidence export -> teardown -> clean reproduction.
 
 ## Kubernetes
 

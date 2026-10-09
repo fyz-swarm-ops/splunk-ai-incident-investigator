@@ -1,60 +1,135 @@
 {
-  "queries": [
+  "error_event_count": 1,
+  "matches_expected_kubernetes_shape": true,
+  "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search trace_id=\"k8s-trace-*\" | table _time trace_id status latency_ms message",
+  "row_count": 18,
+  "rows": [
     {
-      "id": "k8s-latency-spike",
-      "purpose": "Find Kubernetes-generated checkout latency spikes above 750 ms.",
-      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search trace_id=\"k8s-*\" latency_ms>750 | table _time trace_id status latency_ms message host"
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "123",
+      "message": "checkout request completed",
+      "status": "200",
+      "trace_id": "k8s-trace-0003"
     },
     {
-      "id": "k8s-error-rate",
-      "purpose": "Find Kubernetes-generated checkout HTTP errors.",
-      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search trace_id=\"k8s-*\" status>=500 | stats count by status message host"
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "112",
+      "message": "checkout request completed",
+      "status": "200",
+      "trace_id": "k8s-trace-0002"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "101",
+      "message": "checkout request completed",
+      "status": "200",
+      "trace_id": "k8s-trace-0001"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "90",
+      "message": "checkout request completed",
+      "status": "200",
+      "trace_id": "k8s-trace-0000"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "112",
+      "message": "checkout request completed after payment provider timeout remediation",
+      "status": "200",
+      "trace_id": "k8s-trace-0014"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "101",
+      "message": "checkout request completed after payment provider timeout remediation",
+      "status": "200",
+      "trace_id": "k8s-trace-0013"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "90",
+      "message": "checkout request completed after payment provider timeout remediation",
+      "status": "200",
+      "trace_id": "k8s-trace-0012"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "123",
+      "message": "payment provider timeout fault active during checkout",
+      "status": "200",
+      "trace_id": "k8s-trace-0011"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "112",
+      "message": "payment provider timeout fault active during checkout",
+      "status": "200",
+      "trace_id": "k8s-trace-0010"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "101",
+      "message": "payment provider timeout fault active during checkout",
+      "status": "200",
+      "trace_id": "k8s-trace-0009"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "1030",
+      "message": "payment provider timeout during checkout",
+      "status": "200",
+      "trace_id": "k8s-trace-0008"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "1180",
+      "message": "payment provider timeout during checkout",
+      "status": "500",
+      "trace_id": "k8s-trace-0007"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "920",
+      "message": "payment provider timeout during checkout",
+      "status": "200",
+      "trace_id": "k8s-trace-0006"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "101",
+      "message": "checkout request completed",
+      "status": "200",
+      "trace_id": "k8s-trace-0005"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "90",
+      "message": "checkout request completed",
+      "status": "200",
+      "trace_id": "k8s-trace-0004"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "90",
+      "message": "checkout request completed after payment provider timeout remediation",
+      "status": "200",
+      "trace_id": "k8s-trace-0016"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "123",
+      "message": "checkout request completed after payment provider timeout remediation",
+      "status": "200",
+      "trace_id": "k8s-trace-0015"
+    },
+    {
+      "_time": "2026-10-09T01:27:06.000+00:00",
+      "latency_ms": "101",
+      "message": "checkout request completed after payment provider timeout remediation",
+      "status": "200",
+      "trace_id": "k8s-trace-0017"
     }
   ],
-  "results": [
-    {
-      "purpose": "Find Kubernetes-generated checkout latency spikes above 750 ms.",
-      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search trace_id=\"k8s-*\" latency_ms>750 | table _time trace_id status latency_ms message host",
-      "query_id": "k8s-latency-spike",
-      "rows": [
-        {
-          "_time": "2026-10-08T21:17:05.000+00:00",
-          "host": "kind-telemetry-generator",
-          "latency_ms": "1030",
-          "message": "payment provider timeout during checkout",
-          "status": "200",
-          "trace_id": "k8s-trace-0008"
-        },
-        {
-          "_time": "2026-10-08T21:17:05.000+00:00",
-          "host": "kind-telemetry-generator",
-          "latency_ms": "1180",
-          "message": "payment provider timeout during checkout",
-          "status": "500",
-          "trace_id": "k8s-trace-0007"
-        },
-        {
-          "_time": "2026-10-08T21:17:05.000+00:00",
-          "host": "kind-telemetry-generator",
-          "latency_ms": "920",
-          "message": "payment provider timeout during checkout",
-          "status": "200",
-          "trace_id": "k8s-trace-0006"
-        }
-      ]
-    },
-    {
-      "purpose": "Find Kubernetes-generated checkout HTTP errors.",
-      "query": "search index=main source=\"splunk-incident-lab:checkout\" | spath | search trace_id=\"k8s-*\" status>=500 | stats count by status message host",
-      "query_id": "k8s-error-rate",
-      "rows": [
-        {
-          "count": "1",
-          "host": "kind-telemetry-generator",
-          "message": "payment provider timeout during checkout",
-          "status": "500"
-        }
-      ]
-    }
-  ]
+  "slow_event_count": 3
 }

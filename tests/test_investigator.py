@@ -9,7 +9,7 @@ import time
 from urllib import request
 import zipfile
 
-from splunk_incident_lab.evidence import write_reports
+from splunk_incident_lab.evidence import EvidenceValidationError, validate_evidence_package, write_reports
 from splunk_incident_lab.investigator import build_investigation, investigate_local, verify_splunk_results
 from splunk_incident_lab.llm import LlmConfig, analyze_with_llm
 from splunk_incident_lab.scenario import write_events
@@ -27,9 +27,12 @@ def test_investigation_finds_injected_checkout_incident(tmp_path):
 
     investigation = investigate_local(events)
 
-    assert investigation["metrics"]["event_count"] == 12
+    assert investigation["metrics"]["event_count"] == 18
     assert investigation["metrics"]["slow_event_count"] == 3
     assert investigation["metrics"]["error_event_count"] == 1
+    assert investigation["lifecycle"]["healthy_baseline"]["verified"] is True
+    assert investigation["lifecycle"]["root_cause_verification"]["verified"] is True
+    assert investigation["lifecycle"]["recovery_verification"]["verified"] is True
     finding = investigation["findings"][0]
     assert finding["severity"] == "high"
     assert finding["evidence_event_ids"]
@@ -55,6 +58,33 @@ def test_evidence_package_contains_raw_queries_and_reports(tmp_path):
         assert "raw/spl-query-plan.json" in archive.namelist()
 
 
+def test_evidence_validation_requires_full_lifecycle(tmp_path):
+    events = tmp_path / "raw" / "events.jsonl"
+    write_events(events)
+    investigation = investigate_local(events)
+    write_reports(tmp_path, investigation)
+
+    validation = validate_evidence_package(tmp_path)
+
+    assert validation["valid"] is True
+    assert validation["lifecycle_verified"] is True
+
+
+def test_evidence_validation_rejects_hash_drift(tmp_path):
+    events = tmp_path / "raw" / "events.jsonl"
+    write_events(events)
+    investigation = investigate_local(events)
+    write_reports(tmp_path, investigation)
+    (tmp_path / "report.md").write_text("tampered\n", encoding="utf-8")
+
+    try:
+        validate_evidence_package(tmp_path)
+    except EvidenceValidationError as exc:
+        assert "hash mismatch" in str(exc)
+    else:
+        raise AssertionError("expected manifest hash drift to fail validation")
+
+
 def test_rest_mode_uncertainty_distinguishes_real_splunk_from_local(tmp_path):
     events = tmp_path / "raw" / "events.jsonl"
     written = write_events(events)
@@ -64,6 +94,18 @@ def test_rest_mode_uncertainty_distinguishes_real_splunk_from_local(tmp_path):
             "rows": [{"trace_id": "trace-0006"}, {"trace_id": "trace-0007"}, {"trace_id": "trace-0008"}],
         },
         {"query_id": "spl-error-rate", "rows": [{"status": "500", "count": "1"}]},
+        {
+            "query_id": "spl-lifecycle-phase-health",
+            "rows": [
+                {"scenario_phase": "healthy-baseline", "events": "6", "max_latency_ms": "123", "errors": "0"},
+                {"scenario_phase": "injected-failure", "events": "6", "max_latency_ms": "1180", "errors": "1"},
+                {"scenario_phase": "recovered", "events": "6", "max_latency_ms": "123", "errors": "0"},
+            ],
+        },
+        {
+            "query_id": "spl-root-cause-ground-truth",
+            "rows": [{"trace_id": f"trace-{index:04d}"} for index in range(6, 12)],
+        },
     ]
 
     investigation = build_investigation(written, "rest", splunk_rest_results=splunk_results)
@@ -80,11 +122,24 @@ def test_splunk_result_verification_matches_expected_shape():
             "rows": [{"trace_id": "trace-0006"}, {"trace_id": "trace-0007"}, {"trace_id": "trace-0008"}],
         },
         {"query_id": "spl-error-rate", "rows": [{"status": "500", "count": "1"}]},
+        {
+            "query_id": "spl-lifecycle-phase-health",
+            "rows": [
+                {"scenario_phase": "healthy-baseline", "events": "6", "max_latency_ms": "123", "errors": "0"},
+                {"scenario_phase": "injected-failure", "events": "6", "max_latency_ms": "1180", "errors": "1"},
+                {"scenario_phase": "recovered", "events": "6", "max_latency_ms": "123", "errors": "0"},
+            ],
+        },
+        {
+            "query_id": "spl-root-cause-ground-truth",
+            "rows": [{"trace_id": f"trace-{index:04d}"} for index in range(6, 12)],
+        },
     ]
 
     verification = verify_splunk_results(results)
 
     assert verification["matches_expected_incident_shape"] is True
+    assert verification["matches_expected_lifecycle_shape"] is True
 
 
 def test_splunk_search_empty_results_are_valid():

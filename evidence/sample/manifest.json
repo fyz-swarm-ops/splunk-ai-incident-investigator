@@ -2,45 +2,45 @@
   "files": [
     {
       "path": "investigation.json",
-      "sha256": "e0e0004a903fa622a63504873be60a86832f0d365e054a497130d9832d6f9f40",
-      "size_bytes": 26665
+      "sha256": "926b22bd35b3a3e49cf1a9ce7de0cabea08787b6b42ea90454a0481cddc375f0",
+      "size_bytes": 39912
     },
     {
       "path": "kubernetes/telemetry-generator.log",
-      "sha256": "71e42d084cde581a79f33f426f20ccddeeb1ded0e4b743b7ae687cabffbd98a1",
-      "size_bytes": 2382
+      "sha256": "850276bba48ca3ab354535caf301ae4e636ef2d420c0ea3cf817b4ffc451af98",
+      "size_bytes": 6259
     },
     {
       "path": "raw/events.jsonl",
-      "sha256": "8fa84c174e28221066d17e40a5b8650cd6bb219411c675c940a49fee801a61ee",
-      "size_bytes": 2334
+      "sha256": "0d8f36a50d91251b6359fcc4f5b3d19a69ace1bff55d7eb11ffd5c5f603ef384",
+      "size_bytes": 6187
     },
     {
       "path": "raw/kubernetes-splunk-results.json",
-      "sha256": "eb878b95f85d3728fa5d68bd3f4832b7cef5264eec228e7d87389e60aae0d5c7",
-      "size_bytes": 2290
+      "sha256": "2d98d88f0c1729bf7a7592f8de0df53ea35e50711f22f71f109d2a7d1a0adea9",
+      "size_bytes": 4150
     },
     {
       "path": "raw/spl-query-plan.json",
-      "sha256": "c6c7ee4dd9bc8bd3d942cd609f0b4f7f3a7474049c23ee4dac0df376c0cdc154",
-      "size_bytes": 628
+      "sha256": "edb4f8f86c19ba560185bc766574366810ae89aa60ec3c575e2be9e5e5fee4de",
+      "size_bytes": 1561
     },
     {
       "path": "raw/splunk-rest-results.json",
-      "sha256": "d6753d28480de3128d1a2a419c8daa1a859f0581d4da08e8d96c35ccf7547268",
-      "size_bytes": 1519
+      "sha256": "a9d3d6059a2022a092cf32f30e9f2123cf5d54256bcafca8ec82538178ae45d8",
+      "size_bytes": 5435
     },
     {
       "path": "report.html",
-      "sha256": "4d29aafe814c3c09d89f84180a802df95fbaa011d59721461493e0a711b48f58",
-      "size_bytes": 6323
+      "sha256": "24e91885f8f5f5b11adbbb6845de185c425f1a805b388aad2157172e33c11361",
+      "size_bytes": 16882
     },
     {
       "path": "report.md",
-      "sha256": "ec52b80760e1acee515770a0484e1b69f09bb29d3a64337e2c06bfcfed7f8ab0",
-      "size_bytes": 2541
+      "sha256": "f0b5fedb91735b00d0eb58976876ec2767810e9bab7044860026eb42e7033e78",
+      "size_bytes": 7002
     }
   ],
-  "generated_at": "2026-10-08T21:28:51.837613+00:00",
+  "generated_at": "2026-10-09T01:27:11.612666+00:00",
   "schema_version": "splunk-incident-lab.manifest.v1"
 }

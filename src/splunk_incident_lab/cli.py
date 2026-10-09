@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from pathlib import Path
 
-from .evidence import write_reports
-from .investigator import build_investigation, investigate_local
+from .evidence import EvidenceValidationError, validate_evidence_package, write_reports
+from .investigator import build_investigation, investigate_local, verify_splunk_results
 from .llm import analyze_with_llm, llm_config_from_env
 from .scenario import read_events, write_events
 from .splunk_client import SplunkRestClient
@@ -30,6 +31,9 @@ def main() -> int:
     export = sub.add_parser("export")
     export.add_argument("--evidence", type=Path, required=True)
 
+    validate = sub.add_parser("validate")
+    validate.add_argument("--evidence", type=Path, required=True)
+
     serve = sub.add_parser("serve")
     serve.add_argument("--evidence", type=Path, required=True)
     serve.add_argument("--host", default="127.0.0.1")
@@ -50,7 +54,7 @@ def main() -> int:
             )
             readiness = client.verify_ready()
             ingest = client.ingest_events(args.events)
-            searches = client.run_searches()
+            searches = _run_searches_until_visible(client)
             investigation = build_investigation(
                 read_events(args.events),
                 mode="rest",
@@ -68,6 +72,7 @@ def main() -> int:
                     "metrics": investigation["metrics"],
                     "mode": investigation["mode"],
                     "findings": investigation["findings"],
+                    "lifecycle": investigation.get("lifecycle"),
                     "queries": investigation["queries"],
                     "timeline": investigation["timeline"],
                     "splunk_rest_results": investigation.get("splunk_rest_results", []),
@@ -116,6 +121,16 @@ def main() -> int:
         for output in outputs:
             print(output)
         return 0
+    if args.command == "validate":
+        try:
+            validation = validate_evidence_package(args.evidence)
+        except EvidenceValidationError as exc:
+            print(f"evidence validation failed: {exc}")
+            return 1
+        import json
+
+        print(json.dumps(validation, indent=2, sort_keys=True))
+        return 0
     if args.command == "serve":
         serve_evidence(args.evidence, args.host, args.port)
         return 0
@@ -134,6 +149,18 @@ def _evidence_context(investigation: dict) -> dict:
         "splunk_path": "local-only file analysis; no Splunk REST query results are present",
         "claim_boundary": "do not claim Splunk-backed confirmation from local mode",
     }
+
+
+def _run_searches_until_visible(client: SplunkRestClient, *, attempts: int = 6, delay_seconds: int = 5) -> list[dict]:
+    last_results: list[dict] = []
+    for attempt in range(1, attempts + 1):
+        last_results = client.run_searches()
+        verification = verify_splunk_results(last_results)
+        if verification["matches_expected_lifecycle_shape"]:
+            return last_results
+        if attempt < attempts:
+            time.sleep(delay_seconds)
+    return last_results
 
 
 if __name__ == "__main__":
