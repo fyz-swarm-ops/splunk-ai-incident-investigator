@@ -81,6 +81,15 @@ make lab-down
 
 The compose lab intentionally does not set `SPLUNK_LICENSE_URI=Free`. Splunk's free license disables authenticated remote login, which prevents the REST API checks and executed SPL path this project is designed to verify.
 
+If a host already uses one of Splunk's default published ports, override only the host-side port:
+
+```bash
+export SPLUNKD_PORT=18089
+export SPLUNKD_URL="https://localhost:18089"
+export SPLUNK_HEC_PORT=18088
+export SPLUNK_WEB_PORT=18000
+```
+
 ## LLM investigation path
 
 The deterministic template analysis remains the default fallback and is labeled `bounded-template` in `investigation.json`. To exercise an actual model-backed path, configure an OpenAI-compatible chat-completions provider:

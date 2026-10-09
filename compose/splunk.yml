@@ -8,9 +8,9 @@ services:
       SPLUNK_GENERAL_TERMS: --accept-sgt-current-at-splunk-com
       SPLUNK_PASSWORD: ${SPLUNK_PASSWORD:?set SPLUNK_PASSWORD}
     ports:
-      - "8000:8000"
-      - "8088:8088"
-      - "8089:8089"
+      - "${SPLUNK_WEB_PORT:-8000}:8000"
+      - "${SPLUNK_HEC_PORT:-8088}:8088"
+      - "${SPLUNKD_PORT:-8089}:8089"
     volumes:
       - splunk_etc:/opt/splunk/etc
       - splunk_var:/opt/splunk/var

@@ -2,6 +2,9 @@ PYTHON ?= python3
 EVIDENCE_DIR ?= evidence/latest
 SPLUNK_MODE ?= local
 SPLUNK_PASSWORD ?= changeme-please-change
+SPLUNK_WEB_PORT ?= 8000
+SPLUNK_HEC_PORT ?= 8088
+SPLUNKD_PORT ?= 8089
 
 .PHONY: test lab-up lab-down lab-seed lab-investigate lab-export lab-validate lab-reproduce lab-deploy lab-kind-up lab-kind-down lab-k8s-secret lab-run-k8s lab-k8s-logs lab-verify-k8s
 
@@ -13,10 +16,10 @@ lab-up:
 		echo "Refusing to start Splunk until ACCEPT_SPLUNK_TERMS=1 is set by an authorized operator."; \
 		exit 2; \
 	fi
-	SPLUNK_PASSWORD="$(SPLUNK_PASSWORD)" docker compose -f compose/splunk.yml up -d
+	SPLUNK_PASSWORD="$(SPLUNK_PASSWORD)" SPLUNK_WEB_PORT="$(SPLUNK_WEB_PORT)" SPLUNK_HEC_PORT="$(SPLUNK_HEC_PORT)" SPLUNKD_PORT="$(SPLUNKD_PORT)" docker compose -f compose/splunk.yml up -d
 
 lab-down:
-	SPLUNK_PASSWORD="$(SPLUNK_PASSWORD)" docker compose -f compose/splunk.yml down -v --remove-orphans
+	SPLUNK_PASSWORD="$(SPLUNK_PASSWORD)" SPLUNK_WEB_PORT="$(SPLUNK_WEB_PORT)" SPLUNK_HEC_PORT="$(SPLUNK_HEC_PORT)" SPLUNKD_PORT="$(SPLUNKD_PORT)" docker compose -f compose/splunk.yml down -v --remove-orphans
 
 lab-seed:
 	$(PYTHON) -m splunk_incident_lab.cli seed --output $(EVIDENCE_DIR)/raw/events.jsonl
